@@ -8,6 +8,7 @@
   const drawingViewerZoomIn = document.querySelector("[data-drawing-viewer-zoom-in]");
   const drawingViewerZoomOut = document.querySelector("[data-drawing-viewer-zoom-out]");
   const drawingViewerZoomReset = document.querySelector("[data-drawing-viewer-zoom-reset]");
+  const printSubmitForms = document.querySelectorAll("[data-print-submit-form]");
   let drawingViewerZoom = 100;
 
   const setSidebarState = (collapsed) => {
@@ -63,6 +64,34 @@
   if (refreshButton && Number.isFinite(autoRefreshSeconds) && autoRefreshSeconds > 0) {
     window.setInterval(() => window.location.reload(), autoRefreshSeconds * 1000);
   }
+
+  printSubmitForms.forEach((form) => {
+    form.addEventListener("submit", () => {
+      const button = form.querySelector("[data-print-submit]");
+      if (!button) return;
+      button.disabled = true;
+      button.textContent = "印刷しています…";
+    });
+  });
+
+  const refreshPrintAttention = async () => {
+    try {
+      const response = await fetch("/api/printing/attention", {
+        headers: { "Accept": "application/json" },
+        cache: "no-store",
+      });
+      if (!response.ok) return;
+      const result = await response.json();
+      const currentRequired = document.body.dataset.hasPrintAttention === "true";
+      const currentCount = Number.parseInt(document.body.dataset.printAttentionCount || "0", 10);
+      if (Boolean(result.required) !== currentRequired || Number(result.count) !== currentCount) {
+        window.location.reload();
+      }
+    } catch (_error) {
+      // Printing continues on the server; a temporary status-check failure needs no user alert.
+    }
+  };
+  window.setInterval(refreshPrintAttention, 60000);
 
   const setDrawingViewerZoom = (nextZoom) => {
     if (!drawingViewerImage) return;

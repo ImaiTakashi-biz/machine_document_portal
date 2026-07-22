@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -85,6 +85,7 @@ def make_service(tmp_path, *, part_numbers, printer=None):
         araichat_base_url="https://example.com",
         araichat_api_key="api-key",
         araichat_room_id="24",
+        print_retry_delays_seconds="180,300,600",
     )
     chat = FakeAraichatService()
     selected_printer = printer or FakePrinter()
@@ -117,9 +118,9 @@ def test_notification_and_printing_are_not_repeated_on_the_weekend(tmp_path) -> 
     saturday_print = service.print_drawings(date(2026, 7, 25))
 
     assert friday_check.status == "completed"
-    assert friday_print.status == "completed"
+    assert friday_print.status == "retry_scheduled"
     assert saturday_check.status == "already_processed"
-    assert saturday_print.status == "already_processed"
+    assert saturday_print.status == "retry_scheduled"
     assert len(chat.messages) == 1
     assert chat.messages[0][0].count("CD-200") == 1
     assert "・CD-200" in chat.messages[0][0]
@@ -137,11 +138,79 @@ def test_print_retry_submits_only_parts_not_already_recorded(tmp_path) -> None:
         printer=printer,
     )
     service.check_and_notify(date(2026, 7, 24))
+    started = datetime(2026, 7, 24, 6, 0, tzinfo=timezone.utc)
 
-    with pytest.raises(PdfPrintError):
-        service.print_drawings(date(2026, 7, 24))
+    first = service.print_drawings(date(2026, 7, 24), now=started)
+
+    assert service.automatic_print_due(
+        date(2026, 7, 24), started + timedelta(seconds=30)
+    ) is False
+    assert service.automatic_print_due(
+        date(2026, 7, 24), started + timedelta(seconds=181)
+    ) is True
+
+    result = service.print_drawings(
+        date(2026, 7, 24), now=started + timedelta(seconds=181)
+    )
+
+    assert first.status == "retry_scheduled"
+    assert result.status == "completed"
+    assert printer.printed == ["AB-100", "CD-200"]
+
+
+def test_automatic_printing_stops_and_asks_for_user_action_after_retries(
+    tmp_path,
+) -> None:
+    service, _, printer = make_service(
+        tmp_path,
+        part_numbers=["AB-100"],
+    )
+    service.check_and_notify(date(2026, 7, 24))
+    started = datetime(2026, 7, 24, 6, 0, tzinfo=timezone.utc)
+
+    results = [
+        service.print_drawings(
+            date(2026, 7, 24),
+            now=started + timedelta(minutes=index * 20),
+        )
+        for index in range(4)
+    ]
+
+    assert [result.status for result in results] == [
+        "retry_scheduled",
+        "retry_scheduled",
+        "retry_scheduled",
+        "action_required",
+    ]
+    state = service.state_store.latest_print_state(attention_only=True)
+    assert state is not None
+    assert state.attention_count == 1
+    assert state.retryable_items[0].part_number == "AB-100"
+    assert printer.printed == []
+
+
+def test_unknown_submission_result_requires_user_confirmation_without_retry(
+    tmp_path,
+) -> None:
+    (tmp_path / "AB-100.pdf").write_bytes(b"pdf")
+
+    class UncertainPrinter:
+        def print_pdf(self, pdf_path: Path) -> None:
+            raise PdfPrintError("result unknown", may_have_submitted=True)
+
+    service, _, _ = make_service(
+        tmp_path,
+        part_numbers=["AB-100"],
+        printer=UncertainPrinter(),
+    )
+    service.check_and_notify(date(2026, 7, 24))
 
     result = service.print_drawings(date(2026, 7, 24))
 
-    assert result.status == "completed"
-    assert printer.printed == ["AB-100", "CD-200"]
+    assert result.status == "action_required"
+    assert service.automatic_print_due(
+        date(2026, 7, 24), datetime.now(timezone.utc) + timedelta(days=1)
+    ) is False
+    state = service.state_store.latest_print_state(attention_only=True)
+    assert state is not None
+    assert state.uncertain_items[0].part_number == "AB-100"

@@ -3,7 +3,7 @@ from datetime import datetime
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.config import PROJECT_ROOT
@@ -11,6 +11,8 @@ from app.dependencies import DatabaseSessionDependency, SettingsDependency
 from app.schemas.dashboard import MachineCard
 from app.services.memory_store import get_memory_store
 from app.services.production_service import ProductionService
+from app.services.scheduled_job_state_store import ScheduledJobStateStore
+from app.services.scheduled_operations_service import ScheduledOperationsService
 from app.utils.time_zone import format_jst
 
 
@@ -55,6 +57,28 @@ def build_overview_lanes(
     return lanes
 
 
+def _print_state_store(settings) -> ScheduledJobStateStore:
+    return ScheduledJobStateStore(
+        settings.scheduled_job_state_path,
+        spreadsheet_id=settings.google_spreadsheet_id,
+    )
+
+
+def _shared_page_context(settings, *, active_page: str) -> dict[str, object]:
+    print_attention = _print_state_store(settings).latest_print_state(
+        attention_only=True
+    )
+    return {
+        "active_page": active_page,
+        "print_attention": print_attention,
+        "auto_refresh_seconds": settings.auto_refresh_seconds,
+        "sharepoint_process_inspection_url": settings.sharepoint_process_inspection_url,
+        "sharepoint_shipping_inspection_url": settings.sharepoint_shipping_inspection_url,
+        "notion_measurement_equipment_inspection_url": settings.notion_measurement_equipment_inspection_url,
+        "current_year": datetime.now().year,
+    }
+
+
 @router.get("/", response_class=HTMLResponse)
 def dashboard(
     request: Request,
@@ -73,11 +97,7 @@ def dashboard(
             "overview_lanes": build_overview_lanes(machine_groups),
             "status_labels": STATUS_LABELS,
             "sample_mode": settings.use_sample_data,
-            "auto_refresh_seconds": settings.auto_refresh_seconds,
-            "sharepoint_process_inspection_url": settings.sharepoint_process_inspection_url,
-            "sharepoint_shipping_inspection_url": settings.sharepoint_shipping_inspection_url,
-            "notion_measurement_equipment_inspection_url": settings.notion_measurement_equipment_inspection_url,
-            "current_year": datetime.now().year,
+            **_shared_page_context(settings, active_page="dashboard"),
         },
     )
 
@@ -109,11 +129,7 @@ def inspection_files(
             "app_name": settings.app_name,
             "dashboard": dashboard_data,
             "machine": machine,
-            "auto_refresh_seconds": settings.auto_refresh_seconds,
-            "sharepoint_process_inspection_url": settings.sharepoint_process_inspection_url,
-            "sharepoint_shipping_inspection_url": settings.sharepoint_shipping_inspection_url,
-            "notion_measurement_equipment_inspection_url": settings.notion_measurement_equipment_inspection_url,
-            "current_year": datetime.now().year,
+            **_shared_page_context(settings, active_page="dashboard"),
         },
     )
 
@@ -142,3 +158,64 @@ def drawing_viewer(
             "preview_url": f"/api/drawings/{quote(machine.machine_id, safe='')}/preview",
         },
     )
+
+
+@router.get("/printing", response_class=HTMLResponse)
+def printing_recovery(
+    request: Request,
+    settings: SettingsDependency,
+) -> HTMLResponse:
+    """Show only the user actions needed to finish the scheduled printing."""
+
+    store = _print_state_store(settings)
+    print_state = store.latest_print_state(attention_only=True) or store.latest_print_state()
+    return templates.TemplateResponse(
+        request=request,
+        name="printing_recovery.html",
+        context={
+            "app_name": settings.app_name,
+            "print_state": print_state,
+            "printer_display_name": settings.drawing_printer_display_name,
+            **_shared_page_context(settings, active_page="printing"),
+        },
+    )
+
+
+@router.post("/printing/{target_key}/retry", response_class=RedirectResponse)
+def retry_scheduled_printing(
+    target_key: str,
+    request: Request,
+    settings: SettingsDependency,
+) -> RedirectResponse:
+    requested_by = request.client.host if request.client else "unknown"
+    ScheduledOperationsService(settings).retry_printing(
+        target_key,
+        requested_by=f"user:{requested_by}",
+    )
+    return RedirectResponse(url="/printing?updated=1", status_code=303)
+
+
+@router.post("/printing/{target_key}/confirm-printed", response_class=RedirectResponse)
+def confirm_scheduled_printing(
+    target_key: str,
+    part_number: str,
+    settings: SettingsDependency,
+) -> RedirectResponse:
+    _print_state_store(settings).confirm_part_printed(target_key, part_number)
+    return RedirectResponse(url="/printing?updated=1", status_code=303)
+
+
+@router.post("/printing/{target_key}/retry-part", response_class=RedirectResponse)
+def retry_scheduled_printing_part(
+    target_key: str,
+    part_number: str,
+    request: Request,
+    settings: SettingsDependency,
+) -> RedirectResponse:
+    requested_by = request.client.host if request.client else "unknown"
+    ScheduledOperationsService(settings).retry_printing(
+        target_key,
+        part_number=part_number,
+        requested_by=f"user:{requested_by}",
+    )
+    return RedirectResponse(url="/printing?updated=1", status_code=303)

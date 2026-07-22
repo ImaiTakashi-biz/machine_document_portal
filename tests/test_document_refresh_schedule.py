@@ -19,6 +19,13 @@ def test_document_refresh_times_reject_invalid_clock_time() -> None:
         Settings(document_refresh_times="25:00")
 
 
+def test_print_retry_delays_accept_positive_seconds() -> None:
+    settings = Settings(print_retry_delays_seconds="180, 300,600")
+
+    assert settings.print_retry_delays_seconds == "180,300,600"
+    assert settings.print_retry_delays == (180, 300, 600)
+
+
 def test_next_document_refresh_uses_next_time_today() -> None:
     now = datetime(2026, 7, 21, 10, 0, tzinfo=JST)
 

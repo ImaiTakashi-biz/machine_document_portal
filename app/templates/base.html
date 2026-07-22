@@ -9,7 +9,12 @@
   <link rel="stylesheet" href="{{ url_for('static', path='/css/style.css') }}">
   <script defer src="{{ url_for('static', path='/js/app.js') }}"></script>
 </head>
-<body data-auto-refresh-seconds="{{ auto_refresh_seconds }}">
+<body
+  class="{% if print_attention %}has-print-attention{% endif %}"
+  data-auto-refresh-seconds="{{ auto_refresh_seconds }}"
+  data-has-print-attention="{% if print_attention %}true{% else %}false{% endif %}"
+  data-print-attention-count="{% if print_attention %}{{ print_attention.attention_count }}{% else %}0{% endif %}"
+>
   <div class="app-shell" id="app-shell">
     <aside class="sidebar" aria-label="メインナビゲーション">
       <div class="sidebar-header">
@@ -20,10 +25,17 @@
         </button>
       </div>
       <nav class="sidebar-nav">
-        <a class="nav-item active" href="/" aria-current="page" title="号機一覧">
+        <a class="nav-item {% if active_page == 'dashboard' %}active{% endif %}" href="/" {% if active_page == 'dashboard' %}aria-current="page"{% endif %} title="号機一覧">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/></svg>
           <span class="nav-label">号機一覧</span>
         </a>
+        {% if print_attention %}
+        <a class="nav-item nav-item-print {% if active_page == 'printing' %}active{% endif %}" href="/printing" {% if active_page == 'printing' %}aria-current="page"{% endif %} title="印刷の確認（{{ print_attention.attention_count }}件）">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V3h12v6"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="7" rx="1"/><path d="M18 12h.01"/></svg>
+          <span class="nav-label">印刷の確認</span>
+          <span class="print-attention-count" aria-label="{{ print_attention.attention_count }}件">{{ print_attention.attention_count }}</span>
+        </a>
+        {% endif %}
         <div class="external-link-group">
           <p class="external-links-heading">外部リンク</p>
         {% if sharepoint_process_inspection_url %}

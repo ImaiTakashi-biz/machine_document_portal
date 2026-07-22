@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -5,13 +7,16 @@ from app.config import get_settings
 from app.main import app
 from app.schemas.dashboard import DocumentCandidate, DocumentState, MachineCard
 from app.services.memory_store import get_memory_store
+from app.services.next_day_sheet_service import SheetTarget
+from app.services.scheduled_job_state_store import ScheduledJobStateStore
 
 
 @pytest.fixture(autouse=True)
-def use_sample_mode(monkeypatch: pytest.MonkeyPatch):
+def use_sample_mode(monkeypatch: pytest.MonkeyPatch, tmp_path):
     monkeypatch.setenv("PERSISTENCE_MODE", "memory")
     monkeypatch.setenv("USE_SAMPLE_DATA", "true")
     monkeypatch.setenv("AUTO_REFRESH_SECONDS", "120")
+    monkeypatch.setenv("SCHEDULED_JOB_STATE_PATH", str(tmp_path / "job-state.json"))
     get_settings.cache_clear()
     get_memory_store.cache_clear()
     yield
@@ -51,6 +56,7 @@ def test_dashboard_renders_in_sample_mode_without_postgresql() -> None:
     assert response.text.count('class="external-link-mark"') == 3
     assert response.text.count(">検査シート</span>") == 6
     assert response.text.count(">加工図面</span>") == 6
+    assert "印刷の確認" not in response.text
 
 
 def test_manual_refresh_endpoint() -> None:
@@ -110,3 +116,61 @@ def test_multiple_inspection_files_are_listed_on_a_separate_page() -> None:
     assert "Vendor A" in selection_response.text
     assert "Vendor B" in selection_response.text
     assert selection_response.text.count('target="_blank"') >= 2
+
+
+def test_print_attention_appears_only_in_sidebar_and_opens_simple_page() -> None:
+    settings = get_settings()
+    store = ScheduledJobStateStore(
+        settings.scheduled_job_state_path,
+        spreadsheet_id="spreadsheet-id",
+    )
+    target = SheetTarget(
+        target_date=date(2026, 7, 23),
+        sheet_id=27,
+        sheet_name="23S",
+    )
+    target_key = store.record_daily_target(date(2026, 7, 22), target)
+    store.register_print_items(target_key, ["AB-100", "CD-200"])
+    store.mark_print_item(target_key, "AB-100", "submitted")
+    store.mark_print_item(target_key, "CD-200", "failed")
+    store.mark_manual_print_incomplete(target_key, error="printer unavailable")
+
+    with TestClient(app) as client:
+        dashboard_response = client.get("/")
+        printing_response = client.get("/printing")
+        attention_response = client.get("/api/printing/attention")
+
+    assert dashboard_response.status_code == 200
+    assert 'href="/printing"' in dashboard_response.text
+    assert ">印刷の確認</span>" in dashboard_response.text
+    assert 'class="print-attention-count"' in dashboard_response.text
+    assert printing_response.status_code == 200
+    assert "一部の加工図を印刷できませんでした" in printing_response.text
+    assert "CD-200" in printing_response.text
+    assert "AB-100" not in printing_response.text
+    assert "未印刷分を印刷する" in printing_response.text
+    assert "printer unavailable" not in printing_response.text
+    assert attention_response.json() == {"required": True, "count": 1}
+
+
+def test_printing_page_allows_a_simple_retry_when_contents_could_not_be_read() -> None:
+    settings = get_settings()
+    store = ScheduledJobStateStore(
+        settings.scheduled_job_state_path,
+        spreadsheet_id="spreadsheet-id",
+    )
+    target = SheetTarget(
+        target_date=date(2026, 7, 23),
+        sheet_id=27,
+        sheet_name="23S",
+    )
+    target_key = store.record_daily_target(date(2026, 7, 22), target)
+    store.mark_manual_print_incomplete(target_key, error="technical detail")
+
+    with TestClient(app) as client:
+        response = client.get("/printing")
+
+    assert response.status_code == 200
+    assert "明日の印刷内容を確認できませんでした" in response.text
+    assert "もう一度確認する" in response.text
+    assert "technical detail" not in response.text

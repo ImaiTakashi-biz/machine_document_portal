@@ -58,6 +58,8 @@ class Settings(BaseSettings):
     araichat_api_key: str | None = None
     araichat_room_id: str = "24"
     drawing_printer_name: str = "iR-ADV C5735(第1工場)"
+    drawing_printer_display_name: str = "第1工場プリンター"
+    print_retry_delays_seconds: str = "180,300,600"
     dashboard_snapshot_path: Path = PROJECT_ROOT / "data" / "dashboard_snapshot.json"
     scheduled_job_state_path: Path = PROJECT_ROOT / "data" / "scheduled_job_state.json"
 
@@ -111,6 +113,27 @@ class Settings(BaseSettings):
             for value in self.document_refresh_times.split(",")
             if value
         )
+
+    @field_validator("print_retry_delays_seconds", mode="before")
+    @classmethod
+    def validate_print_retry_delays(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise ValueError("PRINT_RETRY_DELAYS_SECONDS must be comma-separated seconds")
+        delays: list[str] = []
+        for candidate in value.split(","):
+            candidate = candidate.strip()
+            if not candidate or not candidate.isdigit() or int(candidate) < 1:
+                raise ValueError(
+                    "PRINT_RETRY_DELAYS_SECONDS must contain positive integers"
+                )
+            delays.append(str(int(candidate)))
+        if not delays:
+            raise ValueError("PRINT_RETRY_DELAYS_SECONDS must not be empty")
+        return ",".join(delays)
+
+    @property
+    def print_retry_delays(self) -> tuple[int, ...]:
+        return tuple(int(value) for value in self.print_retry_delays_seconds.split(","))
 
     @property
     def database_configured(self) -> bool:

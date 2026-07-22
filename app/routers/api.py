@@ -9,6 +9,7 @@ from app.dependencies import DatabaseSessionDependency, SettingsDependency
 from app.services.google_sheets_sync_service import GoogleSheetsSyncService
 from app.services.google_sheets_memory_sync_service import GoogleSheetsMemorySyncService
 from app.services.memory_store import get_memory_store
+from app.services.scheduled_job_state_store import ScheduledJobStateStore
 from app.services.nas_drawing_service import (
     NasDrawingAccessError,
     NasDrawingPreviewError,
@@ -29,6 +30,23 @@ class RefreshResponse(BaseModel):
     processed_count: int | None = None
     success_count: int | None = None
     error_count: int | None = None
+
+
+class PrintAttentionResponse(BaseModel):
+    required: bool
+    count: int = 0
+
+
+@router.get("/printing/attention", response_model=PrintAttentionResponse)
+def printing_attention(settings: SettingsDependency) -> PrintAttentionResponse:
+    state = ScheduledJobStateStore(
+        settings.scheduled_job_state_path,
+        spreadsheet_id=settings.google_spreadsheet_id,
+    ).latest_print_state(attention_only=True)
+    return PrintAttentionResponse(
+        required=state is not None,
+        count=state.attention_count if state is not None else 0,
+    )
 
 
 @router.get("/drawings/{machine_id}/preview", response_class=Response)

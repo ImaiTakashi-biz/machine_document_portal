@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}印刷の確認 | {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="page printing-page">
+  <header class="printing-header">
+    <div>
+      <p class="page-eyebrow">TOMORROW'S DRAWINGS</p>
+      <h1 class="page-title">明日の加工図</h1>
+    </div>
+    <a class="btn printing-back-button" href="/">号機一覧に戻る</a>
+  </header>
+
+  {% if not print_state %}
+  <section class="printing-card printing-complete" role="status">
+    <div class="printing-state-icon" aria-hidden="true">✓</div>
+    <div>
+      <h2>確認が必要な印刷はありません</h2>
+      <p>現在、操作は必要ありません。</p>
+    </div>
+  </section>
+  {% elif print_state.completed %}
+  <section class="printing-card printing-complete" role="status">
+    <div class="printing-state-icon" aria-hidden="true">✓</div>
+    <div>
+      <h2>明日の加工図を印刷しました</h2>
+      <p>対象：{{ print_state.target.sheet_name }}</p>
+    </div>
+  </section>
+  {% elif not print_state.attention_required %}
+  <section class="printing-card printing-progress" role="status">
+    <div class="printing-state-icon" aria-hidden="true">↻</div>
+    <div>
+      <h2>印刷を自動でやり直しています</h2>
+      <p>操作は必要ありません。</p>
+    </div>
+  </section>
+  {% else %}
+  <section class="printing-card printing-summary">
+    <div>
+      <p class="printing-target">対象：{{ print_state.target.sheet_name }}</p>
+      {% if print_state.items %}
+      <h2>一部の加工図を印刷できませんでした</h2>
+      <p>すでに印刷した加工図は印刷しません。</p>
+      {% else %}
+      <h2>明日の印刷内容を確認できませんでした</h2>
+      <p>もう一度確認できます。</p>
+      {% endif %}
+    </div>
+    {% if print_state.items %}
+    <div class="printing-count" aria-label="未確認{{ print_state.attention_count }}件">
+      <strong>{{ print_state.attention_count }}</strong>
+      <span>件</span>
+    </div>
+    {% endif %}
+  </section>
+
+  {% if not print_state.items %}
+  <section class="printing-card printing-action-card">
+    <div class="printing-action-copy">
+      <h2>印刷内容をもう一度確認する</h2>
+      <p>確認できるようになった加工図は、そのまま印刷します。</p>
+    </div>
+    <form method="post" action="/printing/{{ print_state.target_key }}/retry" data-print-submit-form>
+      <button class="btn btn-primary printing-primary-action" type="submit" data-print-submit>
+        もう一度確認する
+      </button>
+    </form>
+  </section>
+  {% endif %}
+
+  {% if print_state.retryable_items %}
+  <section class="printing-card printing-action-card">
+    <div class="printing-action-copy">
+      <h2>未印刷の加工図</h2>
+      <p>{{ printer_display_name }}をご確認してから、印刷してください。</p>
+    </div>
+    <ul class="printing-item-list">
+      {% for item in print_state.retryable_items %}
+      <li>
+        <strong>{{ item.part_number }}</strong>
+        <span>{% if item.status == 'missing' %}加工図をもう一度確認します{% else %}これから印刷します{% endif %}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    <div class="printer-check">
+      <p>{{ printer_display_name }}をご確認ください。</p>
+      <span>電源・用紙・プリンターの表示に問題がなければ印刷できます。</span>
+    </div>
+    <form method="post" action="/printing/{{ print_state.target_key }}/retry" data-print-submit-form>
+      <button class="btn btn-primary printing-primary-action" type="submit" data-print-submit>
+        未印刷分を印刷する
+      </button>
+    </form>
+  </section>
+  {% endif %}
+
+  {% if print_state.uncertain_items %}
+  <section class="printing-card printing-action-card">
+    <div class="printing-action-copy">
+      <h2>用紙をご確認ください</h2>
+      <p>次の加工図がプリンターから出ているか、ご確認ください。</p>
+    </div>
+    <div class="printing-confirm-list">
+      {% for item in print_state.uncertain_items %}
+      <article class="printing-confirm-item">
+        <strong>{{ item.part_number }}</strong>
+        <div class="printing-confirm-actions">
+          <form method="post" action="/printing/{{ print_state.target_key }}/confirm-printed?part_number={{ item.part_number|urlencode }}">
+            <button class="btn printing-secondary-action" type="submit">印刷されている</button>
+          </form>
+          <form method="post" action="/printing/{{ print_state.target_key }}/retry-part?part_number={{ item.part_number|urlencode }}" data-print-submit-form>
+            <button class="btn btn-primary" type="submit" data-print-submit>印刷されていない</button>
+          </form>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

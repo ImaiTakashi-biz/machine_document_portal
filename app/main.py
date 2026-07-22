@@ -111,23 +111,42 @@ async def run_daily_scheduled_operations() -> None:
     while True:
         now = datetime.now(JST)
         run_date = now.date()
-        jobs = (
-            ("next-day-check", time(13, 0), service.check_and_notify),
-            ("drawing-print", time(15, 0), service.print_drawings),
-        )
-        for job_name, scheduled_time, operation in jobs:
-            trigger_key = (run_date.isoformat(), job_name)
-            if now.time() < scheduled_time or trigger_key in triggered:
-                continue
-            triggered.add(trigger_key)
+        notification_key = (run_date.isoformat(), "next-day-check")
+        if now.time() >= time(13, 0) and notification_key not in triggered:
+            triggered.add(notification_key)
             try:
-                result = await to_thread(operation, run_date)
+                result = await to_thread(service.check_and_notify, run_date)
             except Exception:
-                logger.exception("Daily scheduled operation failed: job=%s", job_name)
+                logger.exception("Daily scheduled operation failed: job=next-day-check")
             else:
                 logger.info(
                     "Daily scheduled operation finished: job=%s status=%s message=%s",
-                    job_name,
+                    "next-day-check",
+                    result.status,
+                    result.message,
+                )
+
+        print_key = (run_date.isoformat(), "drawing-print-no-target")
+        if (
+            now.time() >= time(15, 0)
+            and print_key not in triggered
+            and service.automatic_print_due(run_date, now)
+        ):
+            try:
+                result = await to_thread(
+                    service.print_drawings,
+                    run_date,
+                    automatic=True,
+                    now=now,
+                )
+            except Exception:
+                logger.exception("Daily scheduled operation failed: job=drawing-print")
+            else:
+                if result.status == "no_target":
+                    triggered.add(print_key)
+                logger.info(
+                    "Daily scheduled operation finished: job=%s status=%s message=%s",
+                    "drawing-print",
                     result.status,
                     result.message,
                 )
