@@ -2,7 +2,7 @@
 
 ## 目的
 
-このドキュメントは、本アプリ（材料ミルシート管理）を含む社内アプリの標準デザインの基準を定義する。
+このドキュメントは、Machine Document Portal を含む社内アプリの標準デザインの基準を定義する。
 
 対象は業務担当者が日常的に使用する社内アプリであり、装飾性よりも「検索しやすい」「入力しやすい」「一覧を確認しやすい」「操作に迷わない」ことを優先する。
 
@@ -109,13 +109,23 @@
 - 外部リンクはホバー時に `accent-soft` 背景を使い、別タブで開くことを示す外部リンク記号を付ける。
 - 折りたたみ時は見出しを隠すが、各外部リンクの記号はアイコン上に残す。
 
-#### ロゴ
+#### ロゴ（サイドバー）
 
 - サイドバーヘッダーには新井精密の「ARAI」ロゴ画像を配置する。
-- ロゴ画像は `frontend/src/assets/`（または `public/`）に配置し、相対参照で読み込む。
+- ロゴ画像は `docs/DESIGN/arai_logo.png` に置き、FastAPI から `/design-assets/arai_logo.png` として配信する（`app/templates/base.html` の `brand-logo`）。
 - 展開時はロゴ画像を表示し、折りたたみ時はロゴを隠すか、頭文字アイコンに切り替える。
-- ロゴの高さはヘッダー内に収まる範囲（目安 `1.5rem`〜`2rem`）とし、縦横比を保つ。
+- ロゴの表示幅は実装の `.brand-logo`（目安 `7.5rem` 幅・縦横比維持）とし、ヘッダー内に収める。
 - ロゴ画像には `alt="新井精密"` を付ける。
+
+#### アプリアイコン（favicon・PWA）
+
+画面内ロゴとは別に、ブラウザタブ・ホーム画面・「アプリとしてインストール」用のアイコンを用意する。
+
+- マスター画像は `app/static/icons/machine_document_portal.png` とする。ここから favicon（`.ico`、16px、32px）、Apple Touch Icon（180px）、PWA 用（192px、512px）を生成して同フォルダに配置する。
+- `app/static/manifest.json` でアプリ名「Machine Document Portal」、短縮名「Machine Portal`、`display: standalone` を定義する。
+- HTML の head は `app/templates/includes/pwa_head.html` で共通化し、`theme-color` はブランド主色 `#1e88e5`（`app/pwa.py` の `PWA_THEME_COLOR` と整合）とする。スプラッシュ用の `background_color` はダークブルー系（例 `#0d1b2a`）とする。
+- アイコン差し替え時は `app/pwa.py` の `STATIC_ICONS_VERSION` を更新し、favicon・manifest 参照のキャッシュを無効化する。
+- Service Worker は使用しない。業務画面のデータ更新・自動再読込は既存のサーバー同期と `app/static/js/app.js` に委ねる。
 
 ### ページ構成
 

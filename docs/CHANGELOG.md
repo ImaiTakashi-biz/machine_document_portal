@@ -2,6 +2,17 @@
 
 ## 2026-07-22
 
+### PWAとアプリアイコン
+
+- `app/static/icons/machine_document_portal.png` を元に、favicon（`.ico`／16px／32px）、Apple Touch Icon（180px）、PWA用アイコン（192px／512px）を配置
+- `app/static/manifest.json` を追加し、`display: standalone`、アプリ名「Machine Document Portal」、短縮名「Machine Portal」を設定
+- `app/templates/includes/pwa_head.html` で favicon、apple-touch-icon、manifest、`theme-color` を共通化し、号機一覧・図面ビューアの両方へ適用
+- アイコン差し替え時のキャッシュ無効化用に `app/pwa.py` の `STATIC_ICONS_VERSION` を導入
+- サイドバー上部のロゴは ARAI ロゴ（`/design-assets/arai_logo.png`）のまま維持
+- 旧 `app/static/images/favicon.svg` を削除。Service Worker は未導入のため、インストール後もブラウザと同じ更新・自動再読込の挙動
+- 静的アイコンと manifest の配信、HTML 上の参照を確認するテストを追加
+- `README.md`、`docs/ARCHITECTURE.md`、`docs/REQUIREMENTS.md`、`docs/DESIGN/DESIGN.md` に PWA・アイコン・サイドバーロゴの役割分担を追記
+
 ### 定時処理状態の安全性と品質チェック
 
 - 定時処理状態ファイルが破損、不正形式、読み書き不能の場合に、空の状態として通知・印刷を続けず安全停止する処理を追加

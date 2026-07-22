@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#1e88e5">
+  <meta name="theme-color" content="{{ pwa_theme_color }}">
   <title>{% block title %}{{ app_name }}{% endblock %}</title>
-  <link rel="icon" href="{{ url_for('static', path='/images/favicon.svg') }}" type="image/svg+xml">
+  {% include "includes/pwa_head.html" %}
   <link rel="stylesheet" href="{{ url_for('static', path='/css/style.css') }}">
   <script defer src="{{ url_for('static', path='/js/app.js') }}"></script>
 </head>

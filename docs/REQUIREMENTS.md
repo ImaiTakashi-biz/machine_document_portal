@@ -13,7 +13,8 @@
 - 当面はPostgreSQLへ保存せず、アプリのプロセス内メモリで状態を保持する。
 - SQLiteは使用しない。
 - PostgreSQL構成は将来の選択肢として残すが、`PERSISTENCE_MODE=memory` では接続しない。
-- UIは `docs/DESIGN` のガイド、ロゴ、ブランド配色を参考にする。
+- UIは `docs/DESIGN` のガイド、ロゴ、ブランド配色を参考にする。サイドバーヘッダーには ARAI ロゴ（`/design-assets/arai_logo.png`）を表示する。
+- ブラウザタブの favicon、ホーム画面追加、Web App Manifest（`display: standalone`）には `app/static/icons/` の Machine Document Portal アイコンと `app/static/manifest.json` を使用する。Service Worker は使用せず、インストール後も画面更新・自動再読込は通常のブラウザ表示と同じ挙動とする。
 - Windows業務PCと工場内タブレットで利用する。
 - 本番ではGoogle Sheets APIへ読み取り専用で接続し、サンプルデータは画面確認用とする。
 - 工程内検査シートはMicrosoft Graphのアプリケーション認証でSharePointから読み取り専用で取得する。

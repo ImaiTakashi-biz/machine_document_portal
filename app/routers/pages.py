@@ -9,6 +9,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.config import PROJECT_ROOT
 from app.dependencies import DatabaseSessionDependency, SettingsDependency
+from app.pwa import PWA_THEME_COLOR, STATIC_ICONS_VERSION
 from app.schemas.dashboard import MachineCard
 from app.services.memory_store import get_memory_store
 from app.services.production_service import ProductionService
@@ -23,6 +24,8 @@ router = APIRouter(include_in_schema=False)
 logger = logging.getLogger(__name__)
 templates = Jinja2Templates(directory=PROJECT_ROOT / "app" / "templates")
 templates.env.filters["format_jst"] = format_jst
+templates.env.globals["static_icons_version"] = STATIC_ICONS_VERSION
+templates.env.globals["pwa_theme_color"] = PWA_THEME_COLOR
 
 
 STATUS_LABELS = {

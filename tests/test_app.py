@@ -234,3 +234,41 @@ def test_drawing_missing_at_cutoff_does_not_show_sidebar_attention() -> None:
     assert "保存後に手動で発行してください" in printing_response.text
     assert "AB-100" in printing_response.text
     assert attention_response.json() == {"required": False, "count": 0}
+
+
+def test_pwa_and_icon_static_assets_are_served() -> None:
+    paths = [
+        "/static/manifest.json",
+        "/static/icons/favicon.ico",
+        "/static/icons/favicon-16x16.png",
+        "/static/icons/favicon-32x32.png",
+        "/static/icons/apple-touch-icon.png",
+        "/static/icons/icon-192.png",
+        "/static/icons/icon-512.png",
+        "/static/icons/machine_document_portal.png",
+    ]
+    with TestClient(app) as client:
+        for path in paths:
+            response = client.get(path)
+            assert response.status_code == 200, path
+        home = client.get("/")
+    assert home.status_code == 200
+    assert 'rel="manifest"' in home.text
+    assert "/static/icons/apple-touch-icon.png" in home.text
+    assert "/design-assets/arai_logo.png" in home.text
+    assert "favicon.svg" not in home.text
+
+
+def test_manifest_json_contents() -> None:
+    with TestClient(app) as client:
+        response = client.get("/static/manifest.json")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["name"] == "Machine Document Portal"
+    assert payload["short_name"] == "Machine Portal"
+    assert payload["display"] == "standalone"
+    assert payload["theme_color"] == "#1e88e5"
+    assert payload["background_color"] == "#0d1b2a"
+    icon_sizes = {icon["sizes"] for icon in payload["icons"]}
+    assert "192x192" in icon_sizes
+    assert "512x512" in icon_sizes
