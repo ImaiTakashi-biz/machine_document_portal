@@ -1,7 +1,14 @@
+import json
 from datetime import date
+from pathlib import Path
+
+import pytest
 
 from app.services.next_day_sheet_service import SheetTarget
-from app.services.scheduled_job_state_store import ScheduledJobStateStore
+from app.services.scheduled_job_state_store import (
+    ScheduledJobStateError,
+    ScheduledJobStateStore,
+)
 
 
 def test_print_attention_survives_a_new_store_instance(tmp_path) -> None:
@@ -92,3 +99,56 @@ def test_manual_print_items_do_not_require_print_attention(tmp_path) -> None:
     assert state.unresolved_items == ()
     assert state.retryable_items == ()
     assert store.latest_print_state(attention_only=True) is None
+
+
+def test_corrupt_state_file_stops_instead_of_starting_with_empty_state(tmp_path) -> None:
+    path = tmp_path / "scheduled-state.json"
+    corrupt_content = '{"daily_targets":'
+    path.write_text(corrupt_content, encoding="utf-8")
+    store = ScheduledJobStateStore(path, spreadsheet_id="spreadsheet-id")
+
+    with pytest.raises(ScheduledJobStateError):
+        store.target_for_run_date(date(2026, 7, 24))
+
+    assert path.read_text(encoding="utf-8") == corrupt_content
+
+
+def test_unknown_print_status_is_rejected_as_unsafe_state(tmp_path) -> None:
+    path = tmp_path / "scheduled-state.json"
+    target = SheetTarget(
+        target_date=date(2026, 7, 27),
+        sheet_id=27,
+        sheet_name="27S",
+    )
+    store = ScheduledJobStateStore(path, spreadsheet_id="spreadsheet-id")
+    target_key = store.record_daily_target(date(2026, 7, 24), target)
+    store.register_print_items(target_key, ["AB-100"])
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["targets"][target_key]["print_items"]["AB-100"]["status"] = "typo"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ScheduledJobStateError):
+        store.print_item_statuses(target_key)
+
+
+def test_state_save_failure_is_reported_as_a_state_error(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "scheduled-state.json"
+    store = ScheduledJobStateStore(path, spreadsheet_id="spreadsheet-id")
+    target = SheetTarget(
+        target_date=date(2026, 7, 27),
+        sheet_id=27,
+        sheet_name="27S",
+    )
+
+    def fail_replace(self: Path, target_path: Path) -> Path:
+        raise OSError("simulated state-storage failure")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+
+    with pytest.raises(ScheduledJobStateError):
+        store.record_daily_target(date(2026, 7, 24), target)
+
+    assert not path.exists()

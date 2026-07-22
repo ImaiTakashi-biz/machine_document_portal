@@ -16,7 +16,6 @@ from app.services.spreadsheet_service import (
 )
 from app.utils.part_number import normalize_part_number
 
-
 logger = logging.getLogger(__name__)
 
 

@@ -15,9 +15,8 @@ from app.services.spreadsheet_service import (
     SpreadsheetError,
     SpreadsheetGateway,
 )
-from app.utils.part_number import normalize_part_number
 from app.utils.machine_sort import parse_machine_id, sort_machines
-
+from app.utils.part_number import normalize_part_number
 
 logger = logging.getLogger(__name__)
 _SYNC_LOCK = Lock()

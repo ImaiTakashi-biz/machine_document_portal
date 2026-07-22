@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-
 JST = ZoneInfo("Asia/Tokyo")
 
 

@@ -6,17 +6,19 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.dependencies import DatabaseSessionDependency, SettingsDependency
-from app.services.google_sheets_sync_service import GoogleSheetsSyncService
 from app.services.google_sheets_memory_sync_service import GoogleSheetsMemorySyncService
+from app.services.google_sheets_sync_service import GoogleSheetsSyncService
 from app.services.memory_store import get_memory_store
-from app.services.scheduled_job_state_store import ScheduledJobStateStore
 from app.services.nas_drawing_service import (
     NasDrawingAccessError,
     NasDrawingPreviewError,
     NasDrawingPreviewService,
     NasDrawingService,
 )
-
+from app.services.scheduled_job_state_store import (
+    ScheduledJobStateError,
+    ScheduledJobStateStore,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["operation"])
@@ -52,10 +54,16 @@ def dashboard_revision() -> DashboardRevisionResponse:
 
 @router.get("/printing/attention", response_model=PrintAttentionResponse)
 def printing_attention(settings: SettingsDependency) -> PrintAttentionResponse:
-    state = ScheduledJobStateStore(
-        settings.scheduled_job_state_path,
-        spreadsheet_id=settings.google_spreadsheet_id,
-    ).latest_print_state(attention_only=True)
+    try:
+        state = ScheduledJobStateStore(
+            settings.scheduled_job_state_path,
+            spreadsheet_id=settings.google_spreadsheet_id,
+        ).latest_print_state(attention_only=True)
+    except ScheduledJobStateError:
+        logger.error(
+            "Print attention API is disabled because scheduled state is unavailable"
+        )
+        state = None
     return PrintAttentionResponse(
         required=state is not None,
         count=state.attention_count if state is not None else 0,

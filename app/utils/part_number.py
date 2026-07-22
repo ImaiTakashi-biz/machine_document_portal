@@ -1,7 +1,6 @@
 import re
 import unicodedata
 
-
 _DASHES = str.maketrans({
     "‐": "-",
     "‑": "-",

@@ -21,7 +21,6 @@ from app.services.scheduled_job_state_store import (
 )
 from app.services.sharepoint_service import SharePointService
 
-
 logger = logging.getLogger(__name__)
 _EXTERNAL_ERROR_STATUSES = {
     "auth_error",
@@ -380,6 +379,16 @@ class ScheduledOperationsService:
                     )
                     continue
 
+                # Persist a fail-closed marker before handing data to Windows.
+                # If this write fails, no print job is submitted. If the process
+                # stops after submission, the next start requires user confirmation
+                # instead of automatically printing the same drawing again.
+                self.state_store.mark_print_item(
+                    target_key,
+                    part_number,
+                    "uncertain",
+                    error="Print submission started",
+                )
                 try:
                     job_id = self.printer.print_pdf(drawing_path)
                 except Exception as exc:

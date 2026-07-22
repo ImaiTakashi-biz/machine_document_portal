@@ -8,7 +8,6 @@ from app.schemas.dashboard import DashboardData, DocumentState, MachineCard
 from app.services.sample_data_service import SampleDataService
 from app.utils.machine_sort import sort_machines
 
-
 logger = logging.getLogger(__name__)
 
 

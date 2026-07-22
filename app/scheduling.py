@@ -8,8 +8,8 @@ from zoneinfo import ZoneInfo
 from app.config import get_settings
 from app.services.google_sheets_memory_sync_service import GoogleSheetsMemorySyncService
 from app.services.memory_store import get_memory_store
+from app.services.scheduled_job_state_store import ScheduledJobStateError
 from app.services.scheduled_operations_service import ScheduledOperationsService
-
 
 JST = ZoneInfo("Asia/Tokyo")
 
@@ -116,6 +116,12 @@ async def run_daily_scheduled_operations() -> None:
             triggered.add(notification_key)
             try:
                 result = await to_thread(service.check_and_notify, run_date)
+            except ScheduledJobStateError:
+                logger.critical(
+                    "Daily scheduled operations stopped because state is unavailable",
+                    exc_info=True,
+                )
+                return
             except Exception:
                 logger.exception("Daily scheduled operation failed: job=next-day-check")
             else:
@@ -131,6 +137,12 @@ async def run_daily_scheduled_operations() -> None:
             triggered.add(recheck_key)
             try:
                 result = await to_thread(service.recheck_and_notify, run_date)
+            except ScheduledJobStateError:
+                logger.critical(
+                    "Daily scheduled operations stopped because state is unavailable",
+                    exc_info=True,
+                )
+                return
             except Exception:
                 logger.exception("Daily scheduled operation failed: job=next-day-recheck")
             else:
@@ -142,11 +154,17 @@ async def run_daily_scheduled_operations() -> None:
                 )
 
         print_key = (run_date.isoformat(), "drawing-print-no-target")
-        if (
-            now.time() >= time(15, 0)
-            and print_key not in triggered
-            and service.automatic_print_due(run_date, now)
-        ):
+        print_due = False
+        if now.time() >= time(15, 0) and print_key not in triggered:
+            try:
+                print_due = service.automatic_print_due(run_date, now)
+            except ScheduledJobStateError:
+                logger.critical(
+                    "Daily scheduled operations stopped because state is unavailable",
+                    exc_info=True,
+                )
+                return
+        if print_due:
             try:
                 result = await to_thread(
                     service.print_drawings,
@@ -154,6 +172,12 @@ async def run_daily_scheduled_operations() -> None:
                     automatic=True,
                     now=now,
                 )
+            except ScheduledJobStateError:
+                logger.critical(
+                    "Daily scheduled operations stopped because state is unavailable",
+                    exc_info=True,
+                )
+                return
             except Exception:
                 logger.exception("Daily scheduled operation failed: job=drawing-print")
             else:

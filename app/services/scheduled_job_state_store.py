@@ -8,14 +8,33 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from threading import Lock, RLock
-from typing import Any, Iterator, Literal
+from typing import Any, Iterator, Literal, cast
 
 from app.services.next_day_sheet_service import SheetTarget
-
 
 logger = logging.getLogger(__name__)
 NotificationStatus = Literal["pending", "completed", "ambiguous"]
 NotificationPhase = Literal["initial", "recheck"]
+PrintItemStatus = Literal[
+    "pending",
+    "failed",
+    "manual_required",
+    "missing",
+    "uncertain",
+    "submitted",
+]
+AutomaticPrintFailureResult = Literal["retry_scheduled", "action_required"]
+
+_PRINT_ITEM_STATUSES = frozenset(
+    {
+        "pending",
+        "failed",
+        "manual_required",
+        "missing",
+        "uncertain",
+        "submitted",
+    }
+)
 
 _locks_guard = Lock()
 _path_locks: dict[str, RLock] = {}
@@ -30,7 +49,7 @@ def _shared_lock(path: Path) -> RLock:
 @dataclass(frozen=True, slots=True)
 class PrintItemState:
     part_number: str
-    status: str
+    status: PrintItemStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +91,10 @@ class PrintRecoveryState:
     @property
     def attention_count(self) -> int:
         return max(len(self.unresolved_items), 1 if self.attention_required else 0)
+
+
+class ScheduledJobStateError(RuntimeError):
+    """The persisted scheduled-operation state is unavailable or invalid."""
 
 
 class ScheduledJobStateStore:
@@ -160,14 +183,16 @@ class ScheduledJobStateStore:
                 item.setdefault("updated_at", None)
             self._save(state)
 
-    def print_item_statuses(self, target_key: str) -> dict[str, str]:
+    def print_item_statuses(self, target_key: str) -> dict[str, PrintItemStatus]:
         with self._lock:
             record = self._target_record(self._load(), target_key)
             items = record.get("print_items", {})
             if not isinstance(items, dict):
                 return {}
             return {
-                str(part_number): str(item.get("status", "pending"))
+                str(part_number): self._print_item_status(
+                    item.get("status", "pending")
+                )
                 for part_number, item in items.items()
                 if isinstance(item, dict)
             }
@@ -176,7 +201,7 @@ class ScheduledJobStateStore:
         self,
         target_key: str,
         part_number: str,
-        status: str,
+        status: PrintItemStatus,
         *,
         error: str | None = None,
         job_id: int | None = None,
@@ -234,7 +259,7 @@ class ScheduledJobStateStore:
         retry_delays: tuple[int, ...],
         error: str,
         uncertain: bool = False,
-    ) -> str:
+    ) -> AutomaticPrintFailureResult:
         """Schedule a safe retry or switch the target to user attention."""
 
         with self._lock:
@@ -321,15 +346,7 @@ class ScheduledJobStateStore:
                 return None
             raw_items = record.get("print_items", {})
             active = record.get("active_part_numbers", list(raw_items))
-            items = tuple(
-                PrintItemState(
-                    part_number=str(part_number),
-                    status=str(raw_items.get(part_number, {}).get("status", "pending")),
-                )
-                for part_number in active
-                if isinstance(part_number, str)
-                and isinstance(raw_items.get(part_number), dict)
-            )
+            items = self._print_items(raw_items, active)
             return PrintRecoveryState(
                 target_key=target_key,
                 target=target,
@@ -365,15 +382,7 @@ class ScheduledJobStateStore:
                 return None
             raw_items = record.get("print_items", {})
             active = record.get("active_part_numbers", list(raw_items))
-            items = tuple(
-                PrintItemState(
-                    part_number=str(part_number),
-                    status=str(raw_items.get(part_number, {}).get("status", "pending")),
-                )
-                for part_number in active
-                if isinstance(part_number, str)
-                and isinstance(raw_items.get(part_number), dict)
-            )
+            items = self._print_items(raw_items, active)
             return PrintRecoveryState(
                 target_key=target_key,
                 target=target,
@@ -440,22 +449,132 @@ class ScheduledJobStateStore:
             logger.warning("Scheduled job state contains an invalid target")
             return None
 
+    @classmethod
+    def _print_items(
+        cls,
+        raw_items: dict[str, Any],
+        active: Any,
+    ) -> tuple[PrintItemState, ...]:
+        if not isinstance(active, list):
+            raise ScheduledJobStateError(
+                "Scheduled job state contains an invalid active part-number list"
+            )
+        return tuple(
+            PrintItemState(
+                part_number=part_number,
+                status=cls._print_item_status(
+                    raw_items[part_number].get("status", "pending")
+                ),
+            )
+            for part_number in active
+            if isinstance(part_number, str)
+            and isinstance(raw_items.get(part_number), dict)
+        )
+
+    @staticmethod
+    def _print_item_status(value: Any) -> PrintItemStatus:
+        if isinstance(value, str) and value in _PRINT_ITEM_STATUSES:
+            return cast(PrintItemStatus, value)
+        raise ScheduledJobStateError(
+            f"Scheduled job state contains an invalid print status: {value!r}"
+        )
+
+    @classmethod
+    def _validate_state(cls, payload: Any) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ScheduledJobStateError("Scheduled job state must be a JSON object")
+        daily_targets = payload.get("daily_targets")
+        targets = payload.get("targets")
+        if not isinstance(daily_targets, dict) or not isinstance(targets, dict):
+            raise ScheduledJobStateError(
+                "Scheduled job state is missing required collections"
+            )
+
+        for target_key, record in targets.items():
+            if not isinstance(target_key, str) or not isinstance(record, dict):
+                raise ScheduledJobStateError(
+                    "Scheduled job state contains an invalid target record"
+                )
+            try:
+                date.fromisoformat(str(record["target_date"]))
+                int(record["sheet_id"])
+                sheet_name = record["sheet_name"]
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ScheduledJobStateError(
+                    "Scheduled job state contains an invalid target"
+                ) from exc
+            if not isinstance(sheet_name, str) or not sheet_name:
+                raise ScheduledJobStateError(
+                    "Scheduled job state contains an invalid sheet name"
+                )
+
+            for status_key in (
+                "notification_status",
+                "recheck_notification_status",
+            ):
+                status = record.get(status_key, "pending")
+                if status not in {"pending", "completed", "ambiguous"}:
+                    raise ScheduledJobStateError(
+                        "Scheduled job state contains an invalid notification status"
+                    )
+
+            print_items = record.get("print_items", {})
+            if not isinstance(print_items, dict):
+                raise ScheduledJobStateError(
+                    "Scheduled job state contains invalid print items"
+                )
+            active_part_numbers = record.get("active_part_numbers", [])
+            printed_part_numbers = record.get("printed_part_numbers", [])
+            if (
+                not isinstance(active_part_numbers, list)
+                or not all(isinstance(value, str) for value in active_part_numbers)
+                or not isinstance(printed_part_numbers, list)
+                or not all(isinstance(value, str) for value in printed_part_numbers)
+            ):
+                raise ScheduledJobStateError(
+                    "Scheduled job state contains an invalid part-number list"
+                )
+            for part_number, item in print_items.items():
+                if not isinstance(part_number, str) or not isinstance(item, dict):
+                    raise ScheduledJobStateError(
+                        "Scheduled job state contains an invalid print item"
+                    )
+                cls._print_item_status(item.get("status", "pending"))
+
+        for run_date, target_key in daily_targets.items():
+            if not isinstance(run_date, str) or not isinstance(target_key, str):
+                raise ScheduledJobStateError(
+                    "Scheduled job state contains an invalid daily target"
+                )
+            try:
+                date.fromisoformat(run_date)
+            except ValueError as exc:
+                raise ScheduledJobStateError(
+                    "Scheduled job state contains an invalid run date"
+                ) from exc
+            if target_key not in targets:
+                raise ScheduledJobStateError(
+                    "Scheduled job state refers to an unknown target"
+                )
+
+        return {"version": 2, "daily_targets": daily_targets, "targets": targets}
+
     def _load(self) -> dict[str, Any]:
         empty = {"version": 2, "daily_targets": {}, "targets": {}}
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
         except FileNotFoundError:
             return empty
-        except (OSError, ValueError):
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             logger.exception("Scheduled job state could not be read")
-            return empty
-        if not isinstance(payload, dict):
-            return empty
-        daily_targets = payload.get("daily_targets")
-        targets = payload.get("targets")
-        if not isinstance(daily_targets, dict) or not isinstance(targets, dict):
-            return empty
-        return {"version": 2, "daily_targets": daily_targets, "targets": targets}
+            raise ScheduledJobStateError(
+                "Scheduled job state could not be read safely"
+            ) from exc
+        try:
+            return self._validate_state(payload)
+        except ScheduledJobStateError:
+            logger.exception("Scheduled job state validation failed")
+            raise
 
     def _save(self, state: dict[str, Any]) -> None:
         try:
@@ -466,6 +585,8 @@ class ScheduledJobStateStore:
                 encoding="utf-8",
             )
             temporary.replace(self.path)
-        except OSError:
+        except (OSError, TypeError, ValueError) as exc:
             logger.exception("Scheduled job state could not be saved")
-            raise
+            raise ScheduledJobStateError(
+                "Scheduled job state could not be saved safely"
+            ) from exc

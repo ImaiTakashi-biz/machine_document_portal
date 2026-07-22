@@ -59,6 +59,23 @@ def test_dashboard_renders_in_sample_mode_without_postgresql() -> None:
     assert "印刷の確認" not in response.text
 
 
+def test_corrupt_print_state_does_not_break_dashboard_or_allow_print_actions() -> None:
+    settings = get_settings()
+    settings.scheduled_job_state_path.write_text("{broken", encoding="utf-8")
+
+    with TestClient(app) as client:
+        dashboard_response = client.get("/")
+        attention_response = client.get("/api/printing/attention")
+        printing_response = client.get("/printing")
+        retry_response = client.post("/printing/unknown/retry")
+
+    assert dashboard_response.status_code == 200
+    assert "印刷の確認" not in dashboard_response.text
+    assert attention_response.json() == {"required": False, "count": 0}
+    assert printing_response.status_code == 503
+    assert retry_response.status_code == 503
+
+
 def test_manual_refresh_endpoint() -> None:
     with TestClient(app) as client:
         response = client.post("/api/refresh")

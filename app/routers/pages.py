@@ -1,3 +1,4 @@
+import logging
 from collections import OrderedDict
 from datetime import datetime
 from urllib.parse import quote
@@ -11,12 +12,15 @@ from app.dependencies import DatabaseSessionDependency, SettingsDependency
 from app.schemas.dashboard import MachineCard
 from app.services.memory_store import get_memory_store
 from app.services.production_service import ProductionService
-from app.services.scheduled_job_state_store import ScheduledJobStateStore
+from app.services.scheduled_job_state_store import (
+    ScheduledJobStateError,
+    ScheduledJobStateStore,
+)
 from app.services.scheduled_operations_service import ScheduledOperationsService
 from app.utils.time_zone import format_jst
 
-
 router = APIRouter(include_in_schema=False)
+logger = logging.getLogger(__name__)
 templates = Jinja2Templates(directory=PROJECT_ROOT / "app" / "templates")
 templates.env.filters["format_jst"] = format_jst
 
@@ -65,9 +69,15 @@ def _print_state_store(settings) -> ScheduledJobStateStore:
 
 
 def _shared_page_context(settings, *, active_page: str) -> dict[str, object]:
-    print_attention = _print_state_store(settings).latest_print_state(
-        attention_only=True
-    )
+    try:
+        print_attention = _print_state_store(settings).latest_print_state(
+            attention_only=True
+        )
+    except ScheduledJobStateError:
+        logger.error(
+            "Print attention is hidden because scheduled state is unavailable"
+        )
+        print_attention = None
     dashboard_updated_at = get_memory_store().get_last_updated_at()
     return {
         "active_page": active_page,
@@ -171,7 +181,16 @@ def printing_recovery(
     """Show only the user actions needed to finish the scheduled printing."""
 
     store = _print_state_store(settings)
-    print_state = store.latest_print_state(attention_only=True) or store.latest_print_state()
+    try:
+        print_state = (
+            store.latest_print_state(attention_only=True)
+            or store.latest_print_state()
+        )
+    except ScheduledJobStateError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="印刷情報を安全に確認できないため、操作を停止しました。",
+        ) from exc
     return templates.TemplateResponse(
         request=request,
         name="printing_recovery.html",
@@ -191,10 +210,16 @@ def retry_scheduled_printing(
     settings: SettingsDependency,
 ) -> RedirectResponse:
     requested_by = request.client.host if request.client else "unknown"
-    ScheduledOperationsService(settings).retry_printing(
-        target_key,
-        requested_by=f"user:{requested_by}",
-    )
+    try:
+        ScheduledOperationsService(settings).retry_printing(
+            target_key,
+            requested_by=f"user:{requested_by}",
+        )
+    except ScheduledJobStateError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="印刷情報を安全に確認できないため、操作を停止しました。",
+        ) from exc
     return RedirectResponse(url="/printing?updated=1", status_code=303)
 
 
@@ -204,7 +229,13 @@ def confirm_scheduled_printing(
     part_number: str,
     settings: SettingsDependency,
 ) -> RedirectResponse:
-    _print_state_store(settings).confirm_part_printed(target_key, part_number)
+    try:
+        _print_state_store(settings).confirm_part_printed(target_key, part_number)
+    except ScheduledJobStateError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="印刷情報を安全に確認できないため、操作を停止しました。",
+        ) from exc
     return RedirectResponse(url="/printing?updated=1", status_code=303)
 
 
@@ -216,9 +247,15 @@ def retry_scheduled_printing_part(
     settings: SettingsDependency,
 ) -> RedirectResponse:
     requested_by = request.client.host if request.client else "unknown"
-    ScheduledOperationsService(settings).retry_printing(
-        target_key,
-        part_number=part_number,
-        requested_by=f"user:{requested_by}",
-    )
+    try:
+        ScheduledOperationsService(settings).retry_printing(
+            target_key,
+            part_number=part_number,
+            requested_by=f"user:{requested_by}",
+        )
+    except ScheduledJobStateError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="印刷情報を安全に確認できないため、操作を停止しました。",
+        ) from exc
     return RedirectResponse(url="/printing?updated=1", status_code=303)

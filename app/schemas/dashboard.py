@@ -4,7 +4,6 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-
 DocumentStatus = Literal[
     "found",
     "not_found",

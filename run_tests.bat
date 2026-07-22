@@ -9,5 +9,18 @@ if not exist ".venv\Scripts\python.exe" (
   exit /b 1
 )
 
+".venv\Scripts\python.exe" -m ruff check app tests migrations
+if errorlevel 1 (
+  echo [ERROR] Ruff check failed or Ruff is not installed.
+  echo Install development dependencies with:
+  echo   .venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+  exit /b 1
+)
+
+".venv\Scripts\python.exe" -m compileall -q app tests migrations
+if errorlevel 1 exit /b 1
+
 ".venv\Scripts\python.exe" -m pytest -q
+if errorlevel 1 exit /b 1
+
 endlocal

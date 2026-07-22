@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings, get_settings
 
-
 logger = logging.getLogger(__name__)
 
 

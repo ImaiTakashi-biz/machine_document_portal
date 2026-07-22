@@ -13,7 +13,10 @@ from app.services.document_search import (
 from app.services.nas_drawing_service import NasDrawingService
 from app.services.next_day_sheet_service import SheetInfo
 from app.services.pdf_print_service import PdfPrintError
-from app.services.scheduled_job_state_store import ScheduledJobStateStore
+from app.services.scheduled_job_state_store import (
+    ScheduledJobStateError,
+    ScheduledJobStateStore,
+)
 from app.services.scheduled_operations_service import ScheduledOperationsService
 
 
@@ -298,3 +301,29 @@ def test_unknown_submission_result_requires_user_confirmation_without_retry(
     state = service.state_store.latest_print_state(attention_only=True)
     assert state is not None
     assert state.uncertain_items[0].part_number == "AB-100"
+
+
+def test_print_job_is_not_submitted_when_preflight_state_save_fails(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    (tmp_path / "AB-100.pdf").write_bytes(b"pdf")
+    service, _, printer = make_service(tmp_path, part_numbers=["AB-100"])
+    service.check_and_notify(date(2026, 7, 24))
+    original_mark_print_item = service.state_store.mark_print_item
+
+    def fail_before_submission(target_key, part_number, status, **kwargs) -> None:
+        if status == "uncertain":
+            raise ScheduledJobStateError("simulated state-storage failure")
+        original_mark_print_item(target_key, part_number, status, **kwargs)
+
+    monkeypatch.setattr(
+        service.state_store,
+        "mark_print_item",
+        fail_before_submission,
+    )
+
+    with pytest.raises(ScheduledJobStateError):
+        service.print_drawings(date(2026, 7, 24))
+
+    assert printer.printed == []
