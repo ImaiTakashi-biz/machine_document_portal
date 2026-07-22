@@ -24,8 +24,14 @@ class FakeGateway:
     def list_sheets(self) -> list[SheetInfo]:
         return [SheetInfo(sheet_id=27, title="27S")]
 
-    def fetch_part_numbers(self, sheet_name: str) -> list[str]:
+    def fetch_part_numbers(
+        self,
+        sheet_name: str,
+        *,
+        target_date: date,
+    ) -> list[str]:
         assert sheet_name == "27S"
+        assert target_date == date(2026, 7, 27)
         return list(self.part_numbers)
 
 
@@ -57,6 +63,16 @@ class FakeInspectionService:
         return results
 
 
+class MissingInspectionService:
+    configured = True
+
+    def search_many(self, part_numbers) -> dict[str, DocumentSearchResult]:
+        return {
+            part_number: DocumentSearchResult(status="not_found")
+            for part_number in part_numbers
+        }
+
+
 class FakeAraichatService:
     def __init__(self) -> None:
         self.messages: list[tuple[str, str]] = []
@@ -77,7 +93,7 @@ class FakePrinter:
         self.printed.append(pdf_path.stem)
 
 
-def make_service(tmp_path, *, part_numbers, printer=None):
+def make_service(tmp_path, *, part_numbers, printer=None, inspection_service=None):
     settings = Settings(
         google_spreadsheet_id="spreadsheet-id",
         nas_drawing_directory=tmp_path,
@@ -85,6 +101,7 @@ def make_service(tmp_path, *, part_numbers, printer=None):
         araichat_base_url="https://example.com",
         araichat_api_key="api-key",
         araichat_room_id="24",
+        sharepoint_process_inspection_url="https://example.com/inspection-folder",
         print_retry_delays_seconds="180,300,600",
     )
     chat = FakeAraichatService()
@@ -96,7 +113,7 @@ def make_service(tmp_path, *, part_numbers, printer=None):
     service = ScheduledOperationsService(
         settings,
         gateway=FakeGateway(part_numbers),
-        inspection_service=FakeInspectionService(),
+        inspection_service=inspection_service or FakeInspectionService(),
         drawing_service=NasDrawingService(tmp_path),
         araichat_service=chat,
         printer=selected_printer,
@@ -113,19 +130,80 @@ def test_notification_and_printing_are_not_repeated_on_the_weekend(tmp_path) -> 
     )
 
     friday_check = service.check_and_notify(date(2026, 7, 24))
+    friday_recheck = service.recheck_and_notify(date(2026, 7, 24))
     friday_print = service.print_drawings(date(2026, 7, 24))
     saturday_check = service.check_and_notify(date(2026, 7, 25))
+    saturday_recheck = service.recheck_and_notify(date(2026, 7, 25))
     saturday_print = service.print_drawings(date(2026, 7, 25))
 
     assert friday_check.status == "completed"
-    assert friday_print.status == "retry_scheduled"
+    assert friday_recheck.status == "completed"
+    assert friday_print.status == "completed"
     assert saturday_check.status == "already_processed"
-    assert saturday_print.status == "retry_scheduled"
-    assert len(chat.messages) == 1
+    assert saturday_recheck.status == "already_processed"
+    assert saturday_print.status == "already_processed"
+    assert len(chat.messages) == 2
     assert chat.messages[0][0].count("CD-200") == 1
-    assert "・CD-200" in chat.messages[0][0]
-    assert "加工図面未アップロードリスト:\n・CD-200" in chat.messages[0][0]
+    assert "■ CD-200" in chat.messages[0][0]
+    assert "【翌営業日セット予定分の検査シート・加工図面確認通知】" in chat.messages[0][0]
+    assert "・加工図面\n  → NASの所定フォルダへ保存してください" in chat.messages[0][0]
+    assert "https://example.com/inspection-folder" in chat.messages[0][0]
+    assert str(tmp_path) in chat.messages[0][0]
+    assert "14:30にもう一度確認します。" in chat.messages[0][0]
+    assert "【翌営業日セット予定分の再確認（14:30）】" in chat.messages[1][0]
+    assert "アップロード後に手動で発行してください。" in chat.messages[1][0]
+    assert chat.messages[0][1].startswith("next-day-check:24:")
+    assert chat.messages[1][1].startswith("next-day-recheck:24:")
     assert printer.printed == ["AB-100"]
+
+    state = service.state_store.latest_print_state_for_key(friday_print.target_key)
+    assert state is not None
+    assert [item.part_number for item in state.manual_items] == ["CD-200"]
+    assert service.state_store.latest_print_state(attention_only=True) is None
+
+
+def test_recheck_does_not_notify_when_missing_drawing_has_been_added(tmp_path) -> None:
+    (tmp_path / "AB-100.pdf").write_bytes(b"pdf")
+    service, chat, _ = make_service(
+        tmp_path,
+        part_numbers=["AB-100", "CD-200"],
+    )
+
+    initial = service.check_and_notify(date(2026, 7, 24))
+    (tmp_path / "CD-200.pdf").write_bytes(b"pdf")
+    recheck = service.recheck_and_notify(date(2026, 7, 24))
+
+    assert initial.status == "completed"
+    assert recheck.status == "no_missing"
+    assert len(chat.messages) == 1
+
+
+def test_initial_check_does_not_notify_when_nothing_is_missing(tmp_path) -> None:
+    (tmp_path / "AB-100.pdf").write_bytes(b"pdf")
+    service, chat, _ = make_service(tmp_path, part_numbers=["AB-100"])
+
+    result = service.check_and_notify(date(2026, 7, 24))
+
+    assert result.status == "no_missing"
+    assert chat.messages == []
+
+
+def test_notification_groups_missing_document_types_under_one_part(tmp_path) -> None:
+    service, chat, _ = make_service(
+        tmp_path,
+        part_numbers=["ZM3-5052314A#02"],
+        inspection_service=MissingInspectionService(),
+    )
+
+    result = service.check_and_notify(date(2026, 7, 24))
+
+    assert result.status == "completed"
+    assert len(chat.messages) == 1
+    message = chat.messages[0][0]
+    assert message.count("■ ZM3-5052314A#02") == 1
+    assert "1品番で確認できないものがありました。" in message
+    assert "・工程内検査シート" in message
+    assert "・加工図面" in message
 
 
 def test_print_retry_submits_only_parts_not_already_recorded(tmp_path) -> None:
@@ -161,9 +239,16 @@ def test_print_retry_submits_only_parts_not_already_recorded(tmp_path) -> None:
 def test_automatic_printing_stops_and_asks_for_user_action_after_retries(
     tmp_path,
 ) -> None:
+    (tmp_path / "AB-100.pdf").write_bytes(b"pdf")
+
+    class FailingPrinter:
+        def print_pdf(self, pdf_path: Path) -> None:
+            raise PdfPrintError("printer unavailable")
+
     service, _, printer = make_service(
         tmp_path,
         part_numbers=["AB-100"],
+        printer=FailingPrinter(),
     )
     service.check_and_notify(date(2026, 7, 24))
     started = datetime(2026, 7, 24, 6, 0, tzinfo=timezone.utc)
@@ -186,7 +271,6 @@ def test_automatic_printing_stops_and_asks_for_user_action_after_retries(
     assert state is not None
     assert state.attention_count == 1
     assert state.retryable_items[0].part_number == "AB-100"
-    assert printer.printed == []
 
 
 def test_unknown_submission_result_requires_user_confirmation_without_retry(

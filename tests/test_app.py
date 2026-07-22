@@ -38,7 +38,7 @@ def test_dashboard_renders_in_sample_mode_without_postgresql() -> None:
     assert response.text.count('class="group-column"') == 6
     assert response.text.count('class="overview-lane"') == 5
     assert response.text.count('class="machine-row ') == 61
-    assert 'data-auto-refresh-seconds="120"' in response.text
+    assert 'data-dashboard-revision="' in response.text
     assert 'class="refresh-controls"' in response.text
     assert "工程内検査シート・加工図面を更新するときに押してください。" in response.text
     assert 'class="badge badge-running">稼働中</span>' in response.text
@@ -64,6 +64,19 @@ def test_manual_refresh_endpoint() -> None:
         response = client.post("/api/refresh")
     assert response.status_code == 200
     assert response.json()["ok"] is True
+
+
+def test_dashboard_revision_endpoint_tracks_completed_dashboard_updates() -> None:
+    with TestClient(app) as client:
+        before = client.get("/api/dashboard/revision")
+        current_dashboard = get_memory_store().get_dashboard()
+        get_memory_store().replace_dashboard(current_dashboard.machines)
+        after = client.get("/api/dashboard/revision")
+
+    assert before.status_code == 200
+    assert after.status_code == 200
+    assert after.json()["updated_at"] is not None
+    assert after.json()["updated_at"] != before.json()["updated_at"]
 
 
 def test_drawing_viewer_opens_as_a_separate_page() -> None:
@@ -174,3 +187,33 @@ def test_printing_page_allows_a_simple_retry_when_contents_could_not_be_read() -
     assert "明日の印刷内容を確認できませんでした" in response.text
     assert "もう一度確認する" in response.text
     assert "technical detail" not in response.text
+
+
+def test_drawing_missing_at_cutoff_does_not_show_sidebar_attention() -> None:
+    settings = get_settings()
+    store = ScheduledJobStateStore(
+        settings.scheduled_job_state_path,
+        spreadsheet_id="spreadsheet-id",
+    )
+    target = SheetTarget(
+        target_date=date(2026, 7, 23),
+        sheet_id=27,
+        sheet_name="23S",
+    )
+    target_key = store.record_daily_target(date(2026, 7, 22), target)
+    store.register_print_items(target_key, ["AB-100"])
+    store.mark_print_item(target_key, "AB-100", "manual_required")
+    store.mark_printing_completed(target_key)
+
+    with TestClient(app) as client:
+        dashboard_response = client.get("/")
+        printing_response = client.get("/printing")
+        attention_response = client.get("/api/printing/attention")
+
+    assert dashboard_response.status_code == 200
+    assert "印刷の確認" not in dashboard_response.text
+    assert printing_response.status_code == 200
+    assert "自動印刷の処理は完了しました" in printing_response.text
+    assert "保存後に手動で発行してください" in printing_response.text
+    assert "AB-100" in printing_response.text
+    assert attention_response.json() == {"required": False, "count": 0}

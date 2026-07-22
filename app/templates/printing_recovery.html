@@ -24,10 +24,28 @@
   <section class="printing-card printing-complete" role="status">
     <div class="printing-state-icon" aria-hidden="true">✓</div>
     <div>
+      {% if print_state.manual_items %}
+      <h2>自動印刷の処理は完了しました</h2>
+      <p>15:00時点で確認できなかった加工図は、保存後に手動で発行してください。</p>
+      {% else %}
       <h2>明日の加工図を印刷しました</h2>
       <p>対象：{{ print_state.target.sheet_name }}</p>
+      {% endif %}
     </div>
   </section>
+  {% if print_state.manual_items %}
+  <section class="printing-card printing-action-card">
+    <div class="printing-action-copy">
+      <h2>手動発行する加工図</h2>
+      <p>次の加工図は15:00時点で確認できなかったため、自動印刷の対象外です。</p>
+    </div>
+    <ul class="printing-item-list">
+      {% for item in print_state.manual_items %}
+      <li><strong>{{ item.part_number }}</strong><span>保存後に手動で発行してください</span></li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
   {% elif not print_state.attention_required %}
   <section class="printing-card printing-progress" role="status">
     <div class="printing-state-icon" aria-hidden="true">↻</div>

@@ -11,7 +11,7 @@
 </head>
 <body
   class="{% if print_attention %}has-print-attention{% endif %}"
-  data-auto-refresh-seconds="{{ auto_refresh_seconds }}"
+  data-dashboard-revision="{{ dashboard_revision }}"
   data-has-print-attention="{% if print_attention %}true{% else %}false{% endif %}"
   data-print-attention-count="{% if print_attention %}{{ print_attention.attention_count }}{% else %}0{% endif %}"
 >

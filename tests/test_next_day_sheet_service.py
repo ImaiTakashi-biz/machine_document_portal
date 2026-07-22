@@ -38,15 +38,54 @@ def test_finds_first_day_sheet_after_month_end() -> None:
     assert target.sheet_name == "1S"
 
 
-def test_reads_non_blank_unique_part_numbers_from_b40_to_k40() -> None:
+def test_reads_non_blank_unique_part_numbers_from_current_date_columns() -> None:
     captured: list[str] = []
+
+    def fetch_values(range_name: str):
+        captured.append(range_name)
+        if range_name.endswith("B36:K36"):
+            return [[
+                "2026/7/27",
+                "2026/7/26",
+                "2026/7/27",
+                "2026/7/27",
+                "2026/7/28",
+            ]]
+        return [[" AB-100 ", "OLD-100", "CD-200", "AB-100", "CD-200"]]
+
     gateway = GoogleSheetsNextDayGateway(
         Settings(),
-        values_fetcher=lambda range_name: captured.append(range_name)
-        or [[" AB-100 ", "", "CD-200", "AB-100", "CD-200"]],
+        values_fetcher=fetch_values,
     )
 
-    values = gateway.fetch_part_numbers("27S")
+    values = gateway.fetch_part_numbers("27S", target_date=date(2026, 7, 27))
 
-    assert captured == ["'27S'!B40:K40"]
+    assert captured == ["'27S'!B36:K36", "'27S'!B40:K40"]
     assert values == [" AB-100 ", "CD-200", "AB-100"]
+
+
+def test_keeps_parts_when_column_date_is_blank_or_unrecognized(caplog) -> None:
+    def fetch_values(range_name: str):
+        if range_name.endswith("B36:K36"):
+            return [["", "日付未入力", "2026-07-27", "2026年7月28日"]]
+        return [["AB-100", "CD-200", "EF-300", "GH-400"]]
+
+    gateway = GoogleSheetsNextDayGateway(Settings(), values_fetcher=fetch_values)
+
+    values = gateway.fetch_part_numbers("27S", target_date=date(2026, 7, 27))
+
+    assert values == ["AB-100", "CD-200", "EF-300", "GH-400"]
+    assert "column=C" in caplog.text
+
+
+def test_includes_later_current_occurrence_when_older_duplicate_is_skipped() -> None:
+    def fetch_values(range_name: str):
+        if range_name.endswith("B36:K36"):
+            return [[date(2026, 7, 26), date(2026, 7, 27)]]
+        return [["AB-100", "AB-100"]]
+
+    gateway = GoogleSheetsNextDayGateway(Settings(), values_fetcher=fetch_values)
+
+    values = gateway.fetch_part_numbers("27S", target_date=date(2026, 7, 27))
+
+    assert values == ["AB-100"]

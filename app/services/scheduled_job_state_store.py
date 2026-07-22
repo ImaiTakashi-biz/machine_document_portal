@@ -15,6 +15,7 @@ from app.services.next_day_sheet_service import SheetTarget
 
 logger = logging.getLogger(__name__)
 NotificationStatus = Literal["pending", "completed", "ambiguous"]
+NotificationPhase = Literal["initial", "recheck"]
 
 _locks_guard = Lock()
 _path_locks: dict[str, RLock] = {}
@@ -45,7 +46,7 @@ class PrintRecoveryState:
         return tuple(
             item
             for item in self.items
-            if item.status in {"pending", "failed", "missing", "uncertain"}
+            if item.status in {"pending", "failed", "uncertain"}
         )
 
     @property
@@ -57,7 +58,15 @@ class PrintRecoveryState:
         return tuple(
             item
             for item in self.items
-            if item.status in {"pending", "failed", "missing"}
+            if item.status in {"pending", "failed"}
+        )
+
+    @property
+    def manual_items(self) -> tuple[PrintItemState, ...]:
+        return tuple(
+            item
+            for item in self.items
+            if item.status in {"missing", "manual_required"}
         )
 
     @property
@@ -100,20 +109,33 @@ class ScheduledJobStateStore:
             resolved = self._target_from_state(self._load(), target_key)
             return resolved[1] if resolved else None
 
-    def notification_status(self, target_key: str) -> NotificationStatus:
+    def notification_status(
+        self,
+        target_key: str,
+        *,
+        phase: NotificationPhase = "initial",
+    ) -> NotificationStatus:
         with self._lock:
             record = self._target_record(self._load(), target_key)
-            candidate = record.get("notification_status", "pending")
+            status_key, _ = self._notification_fields(phase)
+            candidate = record.get(status_key, "pending")
             if candidate in {"completed", "ambiguous"}:
                 return candidate
             return "pending"
 
-    def mark_notification(self, target_key: str, status: NotificationStatus) -> None:
+    def mark_notification(
+        self,
+        target_key: str,
+        status: NotificationStatus,
+        *,
+        phase: NotificationPhase = "initial",
+    ) -> None:
         with self._lock:
             state = self._load()
             record = self._target_record(state, target_key)
-            record["notification_status"] = status
-            record["notification_completed_at"] = (
+            status_key, completed_at_key = self._notification_fields(phase)
+            record[status_key] = status
+            record[completed_at_key] = (
                 datetime.now(timezone.utc).isoformat() if status == "completed" else None
             )
             self._save(state)
@@ -368,6 +390,8 @@ class ScheduledJobStateStore:
             "sheet_name": target.sheet_name,
             "notification_status": "pending",
             "notification_completed_at": None,
+            "recheck_notification_status": "pending",
+            "recheck_notification_completed_at": None,
             "printing_completed": False,
             "printing_completed_at": None,
             "printed_part_numbers": [],
@@ -378,6 +402,15 @@ class ScheduledJobStateStore:
             "print_attention_required": False,
             "last_print_error": None,
         }
+
+    @staticmethod
+    def _notification_fields(phase: NotificationPhase) -> tuple[str, str]:
+        if phase == "recheck":
+            return (
+                "recheck_notification_status",
+                "recheck_notification_completed_at",
+            )
+        return "notification_status", "notification_completed_at"
 
     @staticmethod
     def _target_record(state: dict[str, Any], target_key: str) -> dict[str, Any]:

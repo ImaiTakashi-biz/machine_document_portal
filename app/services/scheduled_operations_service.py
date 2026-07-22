@@ -14,7 +14,10 @@ from app.services.next_day_sheet_service import (
     SheetTarget,
 )
 from app.services.pdf_print_service import PdfPrinter, RawPdfPrinter
-from app.services.scheduled_job_state_store import ScheduledJobStateStore
+from app.services.scheduled_job_state_store import (
+    NotificationPhase,
+    ScheduledJobStateStore,
+)
 from app.services.sharepoint_service import SharePointService
 
 
@@ -78,7 +81,37 @@ class ScheduledOperationsService:
             )
 
         target_key = self.state_store.record_daily_target(run_date, target)
-        notification_status = self.state_store.notification_status(target_key)
+        return self._check_target_and_notify(
+            target_key,
+            target,
+            phase="initial",
+        )
+
+    def recheck_and_notify(self, run_date: date) -> ScheduledOperationResult:
+        stored_target = self.state_store.target_for_run_date(run_date)
+        if stored_target is None:
+            return ScheduledOperationResult(
+                status="no_target",
+                message="13:00に対象シートが決定されていないため再確認をスキップしました。",
+            )
+        target_key, target = stored_target
+        return self._check_target_and_notify(
+            target_key,
+            target,
+            phase="recheck",
+        )
+
+    def _check_target_and_notify(
+        self,
+        target_key: str,
+        target: SheetTarget,
+        *,
+        phase: NotificationPhase,
+    ) -> ScheduledOperationResult:
+        notification_status = self.state_store.notification_status(
+            target_key,
+            phase=phase,
+        )
         if notification_status == "ambiguous":
             return ScheduledOperationResult(
                 status="ambiguous",
@@ -90,14 +123,18 @@ class ScheduledOperationsService:
                 target_key=target_key,
             )
         if notification_status == "completed":
+            label = "再確認通知" if phase == "recheck" else "通知"
             return ScheduledOperationResult(
                 status="already_processed",
-                message=f"{target.sheet_name} は通知済みのためスキップしました。",
+                message=f"{target.sheet_name} は{label}済みのためスキップしました。",
                 target=target,
                 target_key=target_key,
             )
 
-        part_numbers = self.gateway.fetch_part_numbers(target.sheet_name)
+        part_numbers = self.gateway.fetch_part_numbers(
+            target.sheet_name,
+            target_date=target.target_date,
+        )
         if not self.inspection_service.configured:
             raise ScheduledOperationError("SharePoint settings are incomplete")
         inspection_results = self.inspection_service.search_many(part_numbers)
@@ -127,24 +164,51 @@ class ScheduledOperationsService:
         except NasDrawingAccessError as exc:
             raise ScheduledOperationError("NAS drawing lookup failed") from exc
 
+        if not missing_inspections and not missing_drawings:
+            self.state_store.mark_notification(
+                target_key,
+                "completed",
+                phase=phase,
+            )
+            return ScheduledOperationResult(
+                status="no_missing",
+                message=f"{target.sheet_name} に確認が必要な資料はありません。",
+                target=target,
+                processed_count=len(part_numbers),
+                target_key=target_key,
+            )
+
         message = self._notification_message(
             target,
+            phase=phase,
             missing_inspections=missing_inspections,
             missing_drawings=missing_drawings,
         )
+        operation_name = (
+            "next-day-recheck" if phase == "recheck" else "next-day-check"
+        )
         idempotency_key = (
-            f"next-day-check:{self.settings.araichat_room_id}:"
+            f"{operation_name}:{self.settings.araichat_room_id}:"
             f"{target.target_date.isoformat()}:{target.sheet_id}"
         )
         try:
             self.araichat_service.send_text(message, idempotency_key=idempotency_key)
         except AraichatAmbiguousError:
-            self.state_store.mark_notification(target_key, "ambiguous")
+            self.state_store.mark_notification(
+                target_key,
+                "ambiguous",
+                phase=phase,
+            )
             raise
-        self.state_store.mark_notification(target_key, "completed")
+        self.state_store.mark_notification(
+            target_key,
+            "completed",
+            phase=phase,
+        )
+        label = "再確認結果" if phase == "recheck" else "確認結果"
         return ScheduledOperationResult(
             status="completed",
-            message=f"{target.sheet_name} の確認結果をARAICHATへ送信しました。",
+            message=f"{target.sheet_name} の{label}をARAICHATへ送信しました。",
             target=target,
             processed_count=len(part_numbers),
             target_key=target_key,
@@ -223,7 +287,10 @@ class ScheduledOperationsService:
                 )
 
             try:
-                part_numbers = self.gateway.fetch_part_numbers(target.sheet_name)
+                part_numbers = self.gateway.fetch_part_numbers(
+                    target.sheet_name,
+                    target_date=target.target_date,
+                )
             except Exception as exc:
                 logger.exception(
                     "Scheduled drawing list could not be read: target=%s requested_by=%s",
@@ -244,7 +311,7 @@ class ScheduledOperationsService:
                 part_number
                 for part_number in part_numbers
                 if statuses.get(part_number, "pending")
-                in {"pending", "failed", "missing"}
+                in {"pending", "failed"}
                 and (only_part_number is None or part_number == only_part_number)
             ]
             if only_part_number is not None and only_part_number not in part_numbers:
@@ -296,9 +363,14 @@ class ScheduledOperationsService:
                     )
                     continue
                 if drawing_path is None:
-                    self.state_store.mark_print_item(target_key, part_number, "missing")
+                    self.state_store.mark_print_item(
+                        target_key,
+                        part_number,
+                        "manual_required",
+                    )
                     logger.warning(
-                        "Scheduled drawing is missing: target=%s part=%s requested_by=%s",
+                        "Scheduled drawing was unavailable at 15:00 and requires manual "
+                        "printing after upload: target=%s part=%s requested_by=%s",
                         target.sheet_name,
                         part_number,
                         requested_by,
@@ -414,23 +486,81 @@ class ScheduledOperationsService:
         if not available:
             raise ScheduledOperationError("NAS drawing directory is unavailable")
 
-    @staticmethod
     def _notification_message(
+        self,
         target: SheetTarget,
         *,
+        phase: NotificationPhase,
         missing_inspections: list[str],
         missing_drawings: list[str],
     ) -> str:
-        def lines(values: list[str]) -> str:
-            if not values:
-                return "（該当なし）"
-            return "\n".join(f"・{value}" for value in values)
+        missing_inspection_set = set(missing_inspections)
+        missing_drawing_set = set(missing_drawings)
+        part_numbers = list(
+            dict.fromkeys([*missing_inspections, *missing_drawings])
+        )
+        part_blocks: list[str] = []
+        for part_number in part_numbers:
+            lines = [f"■ {part_number}"]
+            if part_number in missing_inspection_set:
+                lines.extend(
+                    (
+                        "・工程内検査シート",
+                        "  → SharePointの所定フォルダへ保存してください",
+                    )
+                )
+            if part_number in missing_drawing_set:
+                lines.extend(
+                    (
+                        "・加工図面",
+                        "  → NASの所定フォルダへ保存してください",
+                    )
+                )
+            part_blocks.append("\n".join(lines))
+        part_list_text = "\n\n".join(part_blocks)
+
+        target_date = f"{target.target_date.month}月{target.target_date.day}日分"
+        missing_count = len(part_numbers)
+        sharepoint_location = (
+            self.settings.sharepoint_process_inspection_url
+            or "（保存場所が設定されていません）"
+        )
+        drawing_location = str(
+            self.settings.nas_drawing_directory
+            or "（保存場所が設定されていません）"
+        )
+        if phase == "recheck":
+            heading = "【翌営業日セット予定分の再確認（14:30）】"
+            introduction = (
+                "14:30に再確認したところ、\n"
+                f"現在も{missing_count}品番で確認できないものがありました。"
+            )
+            closing = (
+                "※加工図面を15:00以降にアップロードした場合は、\n"
+                "  自動印刷されません。\n"
+                "  アップロード後に手動で発行してください。"
+            )
+        else:
+            heading = "【翌営業日セット予定分の検査シート・加工図面確認通知】"
+            introduction = (
+                "13:00時点で、翌営業日のセット予定に必要な\n"
+                "検査シート・加工図面のうち、\n"
+                f"{missing_count}品番で確認できないものがありました。"
+            )
+            closing = (
+                "※加工図面は15:00の印刷前までに保存すると、\n"
+                "  自動印刷の対象になります。\n\n"
+                "14:30にもう一度確認します。"
+            )
 
         return (
-            "【翌営業日セット内容リンク設定通知】\n\n"
-            f"対象シート: {target.sheet_name}\n\n"
-            "■ 工程検査シートリンク未設定リスト:\n"
-            f"{lines(missing_inspections)}\n\n"
-            "■ 加工図面未アップロードリスト:\n"
-            f"{lines(missing_drawings)}"
+            f"{heading}\n\n"
+            f"対象：{target.sheet_name}（{target_date}）\n\n"
+            f"{introduction}\n\n"
+            f"{part_list_text}\n\n\n"
+            "【工程内検査シートの保存場所】\n\n"
+            f"{sharepoint_location}\n\n\n"
+            "【加工図面の保存場所】\n\n"
+            f"{drawing_location}\n\n\n"
+            f"{closing}"
         )

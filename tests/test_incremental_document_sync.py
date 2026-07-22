@@ -13,8 +13,10 @@ from app.services.spreadsheet_service import ProductionRecord, SpreadsheetGatewa
 class MutableGateway(SpreadsheetGateway):
     def __init__(self, records: list[ProductionRecord]) -> None:
         self.records = records
+        self.fetch_count = 0
 
     def fetch_current_productions(self) -> list[ProductionRecord]:
+        self.fetch_count += 1
         return self.records
 
 
@@ -115,6 +117,33 @@ def test_document_refresh_rechecks_all_parts_without_reading_google(tmp_path) ->
     ]
     assert drawing_service.calls == ["AB-100", "AB-200", "AB-100", "AB-200"]
     assert len(store.get_dashboard().machines) == 2
+
+
+def test_full_sync_reads_google_and_rechecks_documents_for_all_current_parts(
+    tmp_path,
+) -> None:
+    service, store, gateway, inspection_service, drawing_service = make_service(
+        tmp_path
+    )
+    service.sync()
+    gateway.records = [
+        ProductionRecord("A-1", "AB-100", "Product A updated", "stopped"),
+        ProductionRecord("A-3", "AB-300", "Product C", "running"),
+    ]
+
+    result = service.sync()
+
+    dashboard = store.get_dashboard()
+    assert result.ok is True
+    assert gateway.fetch_count == 2
+    assert [machine.machine_id for machine in dashboard.machines] == ["A-1", "A-3"]
+    assert inspection_service.calls == [
+        ("AB-100", "AB-200"),
+        ("AB-100", "AB-300"),
+    ]
+    assert drawing_service.calls == ["AB-100", "AB-200", "AB-100", "AB-300"]
+    assert dashboard.machines[0].product_name == "Product A updated"
+    assert dashboard.machines[0].production_status == "stopped"
 
 
 class RelatedInspectionService:

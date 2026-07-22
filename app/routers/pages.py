@@ -68,10 +68,13 @@ def _shared_page_context(settings, *, active_page: str) -> dict[str, object]:
     print_attention = _print_state_store(settings).latest_print_state(
         attention_only=True
     )
+    dashboard_updated_at = get_memory_store().get_dashboard().last_updated_at
     return {
         "active_page": active_page,
         "print_attention": print_attention,
-        "auto_refresh_seconds": settings.auto_refresh_seconds,
+        "dashboard_revision": (
+            dashboard_updated_at.isoformat() if dashboard_updated_at else ""
+        ),
         "sharepoint_process_inspection_url": settings.sharepoint_process_inspection_url,
         "sharepoint_shipping_inspection_url": settings.sharepoint_shipping_inspection_url,
         "notion_measurement_equipment_inspection_url": settings.notion_measurement_equipment_inspection_url,

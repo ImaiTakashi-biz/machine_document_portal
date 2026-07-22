@@ -37,6 +37,19 @@ class PrintAttentionResponse(BaseModel):
     count: int = 0
 
 
+class DashboardRevisionResponse(BaseModel):
+    updated_at: datetime | None = None
+
+
+@router.get("/dashboard/revision", response_model=DashboardRevisionResponse)
+def dashboard_revision() -> DashboardRevisionResponse:
+    """Return the completed dashboard revision observed by browser clients."""
+
+    return DashboardRevisionResponse(
+        updated_at=get_memory_store().get_dashboard().last_updated_at,
+    )
+
+
 @router.get("/printing/attention", response_model=PrintAttentionResponse)
 def printing_attention(settings: SettingsDependency) -> PrintAttentionResponse:
     state = ScheduledJobStateStore(

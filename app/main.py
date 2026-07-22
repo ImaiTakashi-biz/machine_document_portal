@@ -65,7 +65,7 @@ def next_document_refresh_at(
 
 
 async def refresh_documents_at_scheduled_times() -> None:
-    """Fully refresh SharePoint and NAS at configured Japan-time clock times."""
+    """Fully refresh Google Sheets, SharePoint, and NAS at configured times."""
 
     settings = get_settings()
     schedule = settings.document_refresh_schedule
@@ -82,21 +82,21 @@ async def refresh_documents_at_scheduled_times() -> None:
         delay = max((next_run - datetime.now(JST)).total_seconds(), 0)
         await sleep(delay)
         try:
-            result = await to_thread(service.refresh_documents)
+            result = await to_thread(service.sync)
         except Exception:
-            logger.exception("Scheduled SharePoint/NAS refresh failed unexpectedly")
+            logger.exception("Scheduled full dashboard refresh failed unexpectedly")
             continue
         if result.ok:
             logger.info(
-                "Scheduled SharePoint/NAS refresh completed: processed=%s",
+                "Scheduled full dashboard refresh completed: processed=%s",
                 result.processed_count,
             )
         else:
-            logger.error("Scheduled SharePoint/NAS refresh failed: %s", result.message)
+            logger.error("Scheduled full dashboard refresh failed: %s", result.message)
 
 
 async def run_daily_scheduled_operations() -> None:
-    """Run the 13:00 notification and 15:00 printing once per calendar day."""
+    """Run the 13:00/14:30 notifications and 15:00 printing each day."""
 
     settings = get_settings()
     if (
@@ -122,6 +122,21 @@ async def run_daily_scheduled_operations() -> None:
                 logger.info(
                     "Daily scheduled operation finished: job=%s status=%s message=%s",
                     "next-day-check",
+                    result.status,
+                    result.message,
+                )
+
+        recheck_key = (run_date.isoformat(), "next-day-recheck")
+        if now.time() >= time(14, 30) and recheck_key not in triggered:
+            triggered.add(recheck_key)
+            try:
+                result = await to_thread(service.recheck_and_notify, run_date)
+            except Exception:
+                logger.exception("Daily scheduled operation failed: job=next-day-recheck")
+            else:
+                logger.info(
+                    "Daily scheduled operation finished: job=%s status=%s message=%s",
+                    "next-day-recheck",
                     result.status,
                     result.message,
                 )
