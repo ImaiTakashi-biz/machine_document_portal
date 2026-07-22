@@ -18,6 +18,12 @@ def test_memory_store_returns_defensive_copies() -> None:
     assert second.machines[0].part_number == "AX-1200-01"
 
 
+def test_memory_store_returns_dashboard_revision_without_exposing_state() -> None:
+    store = make_store()
+
+    assert store.get_last_updated_at() == store.get_dashboard().last_updated_at
+
+
 def test_replacing_dashboard_keeps_state_until_store_is_cleared() -> None:
     store = make_store()
     replacement = MachineCard(

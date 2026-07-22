@@ -94,8 +94,13 @@ class GoogleSheetsNextDayGateway:
         escaped_name = sheet_name.replace("'", "''")
         date_range_name = f"'{escaped_name}'!B36:K36"
         part_range_name = f"'{escaped_name}'!B40:K40"
-        date_rows = self._fetch_values(date_range_name)
-        part_rows = self._fetch_values(part_range_name)
+        if self._values_fetcher is not None:
+            date_rows = self._values_fetcher(date_range_name)
+            part_rows = self._values_fetcher(part_range_name)
+        else:
+            date_rows, part_rows = self._fetch_ranges(
+                (date_range_name, part_range_name)
+            )
 
         column_dates = date_rows[0] if date_rows else []
         values = part_rows[0] if part_rows else []
@@ -129,18 +134,18 @@ class GoogleSheetsNextDayGateway:
             part_numbers.append(value)
         return part_numbers
 
-    def _fetch_values(self, range_name: str) -> Sequence[Sequence[object]]:
-        if self._values_fetcher is not None:
-            return self._values_fetcher(range_name)
-
+    def _fetch_ranges(
+        self,
+        range_names: tuple[str, ...],
+    ) -> tuple[Sequence[Sequence[object]], ...]:
         service, spreadsheet_id = self._service()
         try:
             response = (
                 service.spreadsheets()
                 .values()
-                .get(
+                .batchGet(
                     spreadsheetId=spreadsheet_id,
-                    range=range_name,
+                    ranges=list(range_names),
                     majorDimension="ROWS",
                     valueRenderOption="FORMATTED_VALUE",
                 )
@@ -148,7 +153,13 @@ class GoogleSheetsNextDayGateway:
             )
         except Exception as exc:
             raise NextDaySheetError("Google Sheets values request failed") from exc
-        return response.get("values", [])
+        raw_ranges = response.get("valueRanges", [])
+        rows: list[Sequence[Sequence[object]]] = []
+        for index in range(len(range_names)):
+            item = raw_ranges[index] if index < len(raw_ranges) else {}
+            values = item.get("values", []) if isinstance(item, dict) else []
+            rows.append(values if isinstance(values, list) else [])
+        return tuple(rows)
 
     @staticmethod
     def _parse_column_date(raw_value: object) -> date | None:

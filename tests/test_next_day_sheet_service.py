@@ -89,3 +89,42 @@ def test_includes_later_current_occurrence_when_older_duplicate_is_skipped() -> 
     values = gateway.fetch_part_numbers("27S", target_date=date(2026, 7, 27))
 
     assert values == ["AB-100"]
+
+
+def test_google_gateway_fetches_date_and_part_ranges_in_one_request(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Request:
+        @staticmethod
+        def execute():
+            return {
+                "valueRanges": [
+                    {"values": [["2026/7/27", "2026/7/26"]]},
+                    {"values": [["AB-100", "OLD-100"]]},
+                ]
+            }
+
+    class Values:
+        @staticmethod
+        def batchGet(**kwargs):
+            captured.update(kwargs)
+            return Request()
+
+    class Spreadsheets:
+        @staticmethod
+        def values():
+            return Values()
+
+    class Service:
+        @staticmethod
+        def spreadsheets():
+            return Spreadsheets()
+
+    gateway = GoogleSheetsNextDayGateway(Settings())
+    monkeypatch.setattr(gateway, "_service", lambda: (Service(), "sheet-id"))
+
+    values = gateway.fetch_part_numbers("27S", target_date=date(2026, 7, 27))
+
+    assert captured["spreadsheetId"] == "sheet-id"
+    assert captured["ranges"] == ["'27S'!B36:K36", "'27S'!B40:K40"]
+    assert values == ["AB-100"]

@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.config import Settings
-from app.main import JST, next_document_refresh_at
+from app.scheduling import JST, next_document_refresh_at
 
 
 def test_document_refresh_times_accept_multiple_japan_times() -> None:

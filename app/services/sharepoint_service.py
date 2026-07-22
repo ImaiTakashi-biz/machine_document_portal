@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from collections import defaultdict, deque
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -11,7 +10,7 @@ from urllib.parse import quote
 import httpx
 
 from app.config import Settings
-from app.services.google_drive_service import (
+from app.services.document_search import (
     DocumentCandidateResult,
     DocumentSearchResult,
 )
@@ -79,13 +78,14 @@ class SharePointService:
     ) -> dict[str, DocumentSearchResult]:
         """Match literal part numbers and positive-integer filename suffixes."""
 
-        part_numbers = {
-            part_number
-            for part_number in part_numbers
-            if part_number
-        }
+        part_numbers = tuple(
+            dict.fromkeys(
+                part_number for part_number in part_numbers if part_number
+            )
+        )
         if not part_numbers:
             return {}
+        part_number_set = set(part_numbers)
         if not self.configured:
             return {
                 part_number: DocumentSearchResult(status="not_checked")
@@ -104,17 +104,18 @@ class SharePointService:
             matches: dict[str, list[_SharePointFile]] = defaultdict(list)
             for file in files:
                 filename_stem = PurePath(file.name).stem
-                if filename_stem in part_numbers:
+                if filename_stem in part_number_set:
                     matches[filename_stem].append(file)
                     continue
-                for part_number in part_numbers:
-                    prefix = f"{part_number}-"
-                    if not filename_stem.startswith(prefix):
-                        continue
-                    suffix = filename_stem[len(prefix) :]
-                    if re.fullmatch(r"[1-9][0-9]*", suffix):
-                        matches[part_number].append(file)
-                        break
+                related_part_number, separator, suffix = filename_stem.rpartition("-")
+                if (
+                    separator
+                    and related_part_number in part_number_set
+                    and suffix.isascii()
+                    and suffix.isdigit()
+                    and not suffix.startswith("0")
+                ):
+                    matches[related_part_number].append(file)
             return {
                 part_number: self._result_for_matches(
                     part_number,

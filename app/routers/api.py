@@ -46,7 +46,7 @@ def dashboard_revision() -> DashboardRevisionResponse:
     """Return the completed dashboard revision observed by browser clients."""
 
     return DashboardRevisionResponse(
-        updated_at=get_memory_store().get_dashboard().last_updated_at,
+        updated_at=get_memory_store().get_last_updated_at(),
     )
 
 

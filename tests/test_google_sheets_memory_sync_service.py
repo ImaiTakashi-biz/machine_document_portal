@@ -1,7 +1,7 @@
 from collections.abc import Iterable
 
 from app.config import Settings
-from app.services.google_drive_service import DocumentSearchResult
+from app.services.document_search import DocumentSearchResult
 from app.services.google_sheets_memory_sync_service import GoogleSheetsMemorySyncService
 from app.services.memory_store import MemoryDashboardStore
 from app.services.spreadsheet_service import (

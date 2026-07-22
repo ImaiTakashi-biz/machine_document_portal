@@ -26,6 +26,14 @@ class MemoryDashboardStore:
                 self._dashboard = self._load_initial_dashboard()
             return self._dashboard.model_copy(deep=True)
 
+    def get_last_updated_at(self) -> datetime | None:
+        """Return the immutable dashboard revision without copying all machines."""
+
+        with self._lock:
+            if self._dashboard is None:
+                self._dashboard = self._load_initial_dashboard()
+            return self._dashboard.last_updated_at
+
     def replace_dashboard(
         self,
         machines: list[MachineCard],

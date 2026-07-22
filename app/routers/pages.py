@@ -68,7 +68,7 @@ def _shared_page_context(settings, *, active_page: str) -> dict[str, object]:
     print_attention = _print_state_store(settings).latest_print_state(
         attention_only=True
     )
-    dashboard_updated_at = get_memory_store().get_dashboard().last_updated_at
+    dashboard_updated_at = get_memory_store().get_last_updated_at()
     return {
         "active_page": active_page,
         "print_attention": print_attention,

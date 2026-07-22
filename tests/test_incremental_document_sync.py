@@ -1,7 +1,7 @@
 from collections.abc import Iterable
 
 from app.config import Settings
-from app.services.google_drive_service import (
+from app.services.document_search import (
     DocumentCandidateResult,
     DocumentSearchResult,
 )
@@ -100,25 +100,6 @@ def test_incremental_sync_rechecks_documents_only_when_part_number_changes(
     assert a1.inspection.url == "https://example.com/AB-100"
 
 
-def test_document_refresh_rechecks_all_parts_without_reading_google(tmp_path) -> None:
-    service, store, gateway, inspection_service, drawing_service = make_service(
-        tmp_path
-    )
-    service.sync()
-    gateway.records = []
-
-    result = service.refresh_documents()
-
-    assert result.ok is True
-    assert result.processed_count == 2
-    assert inspection_service.calls == [
-        ("AB-100", "AB-200"),
-        ("AB-100", "AB-200"),
-    ]
-    assert drawing_service.calls == ["AB-100", "AB-200", "AB-100", "AB-200"]
-    assert len(store.get_dashboard().machines) == 2
-
-
 def test_full_sync_reads_google_and_rechecks_documents_for_all_current_parts(
     tmp_path,
 ) -> None:
@@ -144,6 +125,22 @@ def test_full_sync_reads_google_and_rechecks_documents_for_all_current_parts(
     assert drawing_service.calls == ["AB-100", "AB-200", "AB-100", "AB-300"]
     assert dashboard.machines[0].product_name == "Product A updated"
     assert dashboard.machines[0].production_status == "stopped"
+
+
+def test_full_sync_checks_duplicate_part_numbers_once_per_external_service(
+    tmp_path,
+) -> None:
+    service, _, gateway, inspection_service, drawing_service = make_service(tmp_path)
+    gateway.records = [
+        ProductionRecord("A-1", "AB-100", "Product A", "running"),
+        ProductionRecord("A-2", "AB-100", "Product A", "running"),
+    ]
+
+    result = service.sync()
+
+    assert result.ok is True
+    assert inspection_service.calls == [("AB-100",)]
+    assert drawing_service.calls == ["AB-100"]
 
 
 class RelatedInspectionService:

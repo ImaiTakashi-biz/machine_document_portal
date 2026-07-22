@@ -35,4 +35,5 @@ Thumbs.db
 .DS_Store
 dist/
 build/
+output/
 *.egg-info/
