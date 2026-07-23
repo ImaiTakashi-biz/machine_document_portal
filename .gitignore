@@ -37,3 +37,4 @@ dist/
 build/
 output/
 *.egg-info/
+.tmp_pytest/

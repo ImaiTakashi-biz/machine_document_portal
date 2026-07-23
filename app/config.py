@@ -22,6 +22,7 @@ class Settings(BaseSettings):
 
     app_name: str = "Machine Document Portal"
     app_env: str = "development"
+    app_port: int = Field(default=8000, ge=1, le=65535)
     debug: bool = False
     use_sample_data: bool = True
     persistence_mode: Literal["memory", "postgresql"] = "memory"

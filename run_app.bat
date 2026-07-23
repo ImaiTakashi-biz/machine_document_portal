@@ -13,5 +13,5 @@ if not exist ".env" (
   echo [INFO] .env was not found. Defaults will start the app in sample data mode.
 )
 
-".venv\Scripts\python.exe" -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+".venv\Scripts\python.exe" -m app
 endlocal
