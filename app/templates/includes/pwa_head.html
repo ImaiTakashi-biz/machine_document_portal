@@ -1,6 +1,8 @@
 {% set icon_v = static_icons_version %}
+<meta name="application-name" content="{{ pwa_name }}">
+<meta name="apple-mobile-web-app-title" content="{{ pwa_name }}">
 <link rel="icon" href="{{ url_for('static', path='/icons/favicon.ico') }}?v={{ icon_v }}" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', path='/icons/favicon-32x32.png') }}?v={{ icon_v }}">
 <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', path='/icons/favicon-16x16.png') }}?v={{ icon_v }}">
 <link rel="apple-touch-icon" href="{{ url_for('static', path='/icons/apple-touch-icon.png') }}?v={{ icon_v }}">
-<link rel="manifest" href="{{ url_for('static', path='/manifest.json') }}?v={{ icon_v }}">
+<link rel="manifest" href="{{ url_for('static', path='/manifest.json') }}?v={{ static_assets_version }}">

@@ -89,11 +89,12 @@
 
 ### アプリ全体
 
-- 画面は `h-screen` の固定アプリレイアウトを基本にする。
+- 画面は `min-height: 100vh`をフォールバックとし、対応ブラウザでは`min-height: 100dvh`で動的な表示高さへ追従する。
 - 背景は `surface-secondary`、本文色は `text` を使う。
-- 左にサイドバー、右にメインコンテンツを配置する。
+- PC・タブレットでは左にサイドバー、右にメインコンテンツを配置し、680px以下では上部モバイルヘッダーとオフキャンバス式サイドバーへ切り替える。
 - メイン領域は `overflow-auto` とし、画面内で業務一覧をスクロールできるようにする。
 - メイン内側は `p-6`、最大幅は `max-w-7xl` を基準にする。
+- iPhone／iPadでは`viewport-fit=cover`と`safe-area-inset-*`を使い、ノッチ、ホームインジケーター、横向き表示の安全領域を確保する。
 
 ### サイドバー
 
@@ -108,6 +109,9 @@
 - 号機一覧と外部リンク群の間に区切り線を置き、展開時は小見出し「外部リンク」を表示する。
 - 外部リンクはホバー時に `accent-soft` 背景を使い、別タブで開くことを示す外部リンク記号を付ける。
 - 折りたたみ時は見出しを隠すが、各外部リンクの記号はアイコン上に残す。
+- 681〜900pxでは幅`4rem`のアイコンサイドバーを使用する。
+- 680px以下ではサイドバーを画面外へ移し、上部の「メニュー」ボタンから開く。背景タップ、メニュー内の閉じるボタン、Escキーで閉じられるようにする。
+- モバイルメニューを閉じている間は`aria-hidden`と`inert`を使用し、開いている間は背景スクロールと背面操作を抑止する。
 
 #### ロゴ（サイドバー）
 
@@ -122,10 +126,20 @@
 画面内ロゴとは別に、ブラウザタブ・ホーム画面・「アプリとしてインストール」用のアイコンを用意する。
 
 - マスター画像は `app/static/icons/machine_document_portal.png` とする。ここから favicon（`.ico`、16px、32px）、Apple Touch Icon（180px）、PWA 用（192px、512px）を生成して同フォルダに配置する。
-- `app/static/manifest.json` でアプリ名「Machine Document Portal」、短縮名「Machine Portal`、`display: standalone` を定義する。
-- HTML の head は `app/templates/includes/pwa_head.html` で共通化し、`theme-color` はブランド主色 `#1e88e5`（`app/pwa.py` の `PWA_THEME_COLOR` と整合）とする。スプラッシュ用の `background_color` はダークブルー系（例 `#0d1b2a`）とする。
-- アイコン差し替え時は `app/pwa.py` の `STATIC_ICONS_VERSION` を更新し、favicon・manifest 参照のキャッシュを無効化する。
+- ブラウザタブ、新規ブックマーク、Apple向けWebアプリ名、`app/static/manifest.json`の通常名・短縮名は「稼働中工程内検査シート」に統一する。
+- `app/static/manifest.json` で`display: standalone`を定義する。
+- HTMLのheadは`app/templates/includes/pwa_head.html`で共通化し、`application-name`と`apple-mobile-web-app-title`も同じ表示名にする。`theme-color`はブランド主色`#1e88e5`（`app/pwa.py`の`PWA_THEME_COLOR`と整合）、スプラッシュ用の`background_color`はダークブルー系（例`#0d1b2a`）とする。
+- アイコン差し替え時は`app/pwa.py`の`STATIC_ICONS_VERSION`を更新する。CSS、JavaScript、Manifestは内容から`STATIC_ASSETS_VERSION`を自動生成し、参照URLのキャッシュを更新する。
 - Service Worker は使用しない。業務画面のデータ更新・自動再読込は既存のサーバー同期と `app/static/js/app.js` に委ねる。
+
+### レスポンシブ表示
+
+- 号機一覧は1700px以上で5列、1051〜1699pxで3列、681〜1050pxで2列、680px以下で1列を基本とする。
+- 号機グループは`details`／`summary`で折りたためるようにし、680px以下では最初のグループだけを初期表示する。
+- タッチ端末では省略された品番・品名を折り返して表示し、マウスホバーだけに情報を依存させない。
+- ボタン、リンク、メニューなど主要なタッチ対象は44px以上を確保する。
+- 加工図ビューアはボタンと2本指操作による50〜300%の拡大・縮小、縦横スクロール、`100dvh`による表示高さ追従に対応する。
+- レスポンシブ判定は物理解像度や端末名ではなくCSSピクセル幅を使用し、OSの表示倍率とブラウザズームを反映する。
 
 ### ページ構成
 

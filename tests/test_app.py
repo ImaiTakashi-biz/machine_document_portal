@@ -28,6 +28,7 @@ def test_dashboard_renders_in_sample_mode_without_postgresql() -> None:
     with TestClient(app) as client:
         response = client.get("/")
     assert response.status_code == 200
+    assert "<title>稼働中工程内検査シート</title>" in response.text
     assert "稼働中工程内検査シート" in response.text
     assert "A-1" in response.text
     assert "候補が複数あります" in response.text
@@ -36,9 +37,14 @@ def test_dashboard_renders_in_sample_mode_without_postgresql() -> None:
     assert 'class="sidebar-meta"' not in response.text
     assert "再起動すると状態はリセット" in response.text
     assert response.text.count('class="group-column"') == 6
+    assert response.text.count('<details class="group-column"') == 6
+    assert response.text.count('<summary class="group-column-header">') == 6
     assert response.text.count('class="overview-lane"') == 5
     assert response.text.count('class="machine-row ') == 61
     assert 'data-dashboard-revision="' in response.text
+    assert 'data-dashboard-revision-poll-seconds="300"' in response.text
+    assert 'data-mobile-nav-toggle' in response.text
+    assert 'data-mobile-nav-backdrop' in response.text
     assert 'class="refresh-controls"' in response.text
     assert "工程内検査シート・加工図面を更新するときに押してください。" in response.text
     assert 'class="badge badge-running">稼働中</span>' in response.text
@@ -100,9 +106,11 @@ def test_drawing_viewer_opens_as_a_separate_page() -> None:
     with TestClient(app) as client:
         response = client.get("/drawings/A-1")
     assert response.status_code == 200
+    assert "<title>稼働中工程内検査シート</title>" in response.text
     assert "A-1_AX-1200-01_加工図面" in response.text
     assert 'data-drawing-viewer-image' in response.text
     assert 'src="/api/drawings/A-1/preview"' in response.text
+    assert "タッチ端末では2本指でも拡大・縮小できます" in response.text
 
 
 def test_multiple_inspection_files_are_listed_on_a_separate_page() -> None:
@@ -174,6 +182,7 @@ def test_print_attention_appears_only_in_sidebar_and_opens_simple_page() -> None
     assert 'href="/printing"' in dashboard_response.text
     assert ">印刷の確認</span>" in dashboard_response.text
     assert 'class="print-attention-count"' in dashboard_response.text
+    assert 'class="mobile-print-attention-count"' in dashboard_response.text
     assert printing_response.status_code == 200
     assert "一部の加工図を印刷できませんでした" in printing_response.text
     assert "CD-200" in printing_response.text
@@ -254,6 +263,11 @@ def test_pwa_and_icon_static_assets_are_served() -> None:
         home = client.get("/")
     assert home.status_code == 200
     assert 'rel="manifest"' in home.text
+    assert '<meta name="application-name" content="稼働中工程内検査シート">' in home.text
+    assert (
+        '<meta name="apple-mobile-web-app-title" '
+        'content="稼働中工程内検査シート">'
+    ) in home.text
     assert "/static/icons/apple-touch-icon.png" in home.text
     assert "/design-assets/arai_logo.png" in home.text
     assert "favicon.svg" not in home.text
@@ -264,8 +278,8 @@ def test_manifest_json_contents() -> None:
         response = client.get("/static/manifest.json")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["name"] == "Machine Document Portal"
-    assert payload["short_name"] == "Machine Portal"
+    assert payload["name"] == "稼働中工程内検査シート"
+    assert payload["short_name"] == "稼働中工程内検査シート"
     assert payload["display"] == "standalone"
     assert payload["theme_color"] == "#1e88e5"
     assert payload["background_color"] == "#0d1b2a"

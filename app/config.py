@@ -64,6 +64,7 @@ class Settings(BaseSettings):
     scheduled_job_state_path: Path = PROJECT_ROOT / "data" / "scheduled_job_state.json"
 
     auto_refresh_seconds: int = Field(default=300, ge=0)
+    dashboard_revision_poll_seconds: int = Field(default=300, ge=0)
     document_refresh_times: str = ""
     log_level: str = "INFO"
     log_dir: Path = PROJECT_ROOT / "logs"

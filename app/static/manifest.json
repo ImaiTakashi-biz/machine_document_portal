@@ -1,6 +1,6 @@
 {
-  "name": "Machine Document Portal",
-  "short_name": "Machine Portal",
+  "name": "稼働中工程内検査シート",
+  "short_name": "稼働中工程内検査シート",
   "description": "製造現場向けの号機・工程内検査シート・加工図面ポータル",
   "start_url": "/",
   "scope": "/",

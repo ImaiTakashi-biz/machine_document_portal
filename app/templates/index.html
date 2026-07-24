@@ -46,7 +46,7 @@
   </div>
 {% endmacro %}
 
-{% block title %}稼働中号機 | {{ app_name }}{% endblock %}
+{% block title %}{{ pwa_name }}{% endblock %}
 
 {% block content %}
 <div class="page page-overview">
@@ -86,8 +86,8 @@
     {% for lane in overview_lanes %}
     <div class="overview-lane">
     {% for group_name, machines in lane %}
-    <section class="group-column" style="--group-color: {{ machines[0].group_color }}" aria-labelledby="group-{{ group_name }}">
-      <header class="group-column-header">
+    <details class="group-column" style="--group-color: {{ machines[0].group_color }}" open>
+      <summary class="group-column-header">
         <div class="group-title-wrap">
           <span class="group-letter" aria-hidden="true">{{ group_name }}</span>
           <div>
@@ -97,7 +97,7 @@
         </div>
         <span class="document-column-label">検査シート</span>
         <span class="document-column-label">加工図面</span>
-      </header>
+      </summary>
 
       <div class="machine-stack">
         {% for machine in machines %}
@@ -135,7 +135,7 @@
         </article>
         {% endfor %}
       </div>
-    </section>
+    </details>
     {% endfor %}
     </div>
     {% endfor %}

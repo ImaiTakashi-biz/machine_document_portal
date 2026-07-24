@@ -9,7 +9,12 @@ from fastapi.templating import Jinja2Templates
 
 from app.config import PROJECT_ROOT
 from app.dependencies import DatabaseSessionDependency, SettingsDependency
-from app.pwa import PWA_THEME_COLOR, STATIC_ICONS_VERSION
+from app.pwa import (
+    PWA_NAME,
+    PWA_THEME_COLOR,
+    STATIC_ASSETS_VERSION,
+    STATIC_ICONS_VERSION,
+)
 from app.schemas.dashboard import MachineCard
 from app.services.memory_store import get_memory_store
 from app.services.production_service import ProductionService
@@ -25,7 +30,9 @@ logger = logging.getLogger(__name__)
 templates = Jinja2Templates(directory=PROJECT_ROOT / "app" / "templates")
 templates.env.filters["format_jst"] = format_jst
 templates.env.globals["static_icons_version"] = STATIC_ICONS_VERSION
+templates.env.globals["static_assets_version"] = STATIC_ASSETS_VERSION
 templates.env.globals["pwa_theme_color"] = PWA_THEME_COLOR
+templates.env.globals["pwa_name"] = PWA_NAME
 
 
 STATUS_LABELS = {
@@ -88,6 +95,7 @@ def _shared_page_context(settings, *, active_page: str) -> dict[str, object]:
         "dashboard_revision": (
             dashboard_updated_at.isoformat() if dashboard_updated_at else ""
         ),
+        "dashboard_revision_poll_seconds": settings.dashboard_revision_poll_seconds,
         "sharepoint_process_inspection_url": settings.sharepoint_process_inspection_url,
         "sharepoint_shipping_inspection_url": settings.sharepoint_shipping_inspection_url,
         "notion_measurement_equipment_inspection_url": settings.notion_measurement_equipment_inspection_url,
